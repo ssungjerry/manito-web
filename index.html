@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>시크릿 마니또 (Secret Manito) - 비밀 친구 & 미션 뽑기</title>
+  <meta name="description" content="팀원들이 각자의 링크로 접속하여 본인의 마니또 대상과 비밀 미션을 확인하는 안전하고 인터랙티브한 마니또 뽑기 서비스">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <link rel="stylesheet" href="./style.css">
+  <script>
+    // 팀원 링크 접속 시 주최자 페이지가 0.1초라도 깜빡이는 현상(FOUC) 원천 차단
+    (function() {
+      try {
+        var h = window.location.hash || '';
+        var s = window.location.search || '';
+        if (h.indexOf('#/reveal') === 0 || h.indexOf('t=') !== -1 || s.indexOf('t=') !== -1) {
+          document.documentElement.className = 'page-reveal';
+        } else if (h.indexOf('#/room') === 0 || h.indexOf('r=') !== -1 || s.indexOf('r=') !== -1) {
+          document.documentElement.className = 'page-room';
+        } else if (h.indexOf('#/ceremony') === 0) {
+          document.documentElement.className = 'page-ceremony';
+        } else if (h.indexOf('#/share') === 0) {
+          document.documentElement.className = 'page-share';
+        } else {
+          document.documentElement.className = 'page-setup';
+        }
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <!-- 축하 컨페티 파티클 캔버스 -->
+  <canvas id="confetti-canvas" class="confetti-canvas"></canvas>
+
+  <!-- 글로벌 내비게이션 바 -->
+  <header class="app-header">
+    <div class="header-container">
+      <a href="#/setup" class="logo" id="logo-link">
+        <span class="logo-icon">🎁</span>
+        <span class="logo-text">시크릿 마니또</span>
+        <span class="logo-badge">Secret</span>
+      </a>
+      <div class="header-actions">
+        <button type="button" id="btn-sound-toggle" class="icon-btn" title="효과음 켜기/끄기" aria-label="효과음 전환">
+          <span id="sound-icon">🔊</span>
+        </button>
+        <button type="button" id="btn-open-guide" class="ghost-btn" aria-label="이용 안내">
+          <span>📖 사용 가이드</span>
+        </button>
+        <button type="button" id="btn-nav-new" class="primary-mini-btn" aria-label="새 마니또 만들기">
+          <span>+ 새로 만들기</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 메인 콘텐츠 영역 -->
+  <main class="main-content">
+
+    <!-- ============================================== -->
+    <!-- VIEW 1: 마니또 주최 및 설정 화면 (#/setup) -->
+    <!-- ============================================== -->
+    <section id="view-setup" class="view-section">
+      <div class="hero-section">
+        <div class="hero-badge">✨ 오직 본인만 확인하는 100% 시크릿 매칭</div>
+        <h1 class="hero-title">두근두근 우리팀 <span class="gradient-text">시크릿 마니또</span></h1>
+        <p class="hero-desc">
+          팀원 명단을 입력하면 각자 <strong>본인만 대상과 미션을 확인할 수 있는 암호화 링크</strong>를 즉시 생성해 드립니다.
+        </p>
+      </div>
+
+      <div class="setup-container">
+        <!-- 1단계: 기본 정보 & 참가자 입력 -->
+        <div class="glass-card step-card">
+          <div class="card-header">
+            <div class="step-num">1</div>
+            <div>
+              <h2 class="card-title">기본 정보 & 팀원 명단 입력</h2>
+              <p class="card-subtitle">마니또를 함께할 팀원들의 이름을 입력해주세요.</p>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="input-room-title" class="form-label">방 이름 (팀/모임명)</label>
+            <input type="text" id="input-room-title" class="form-input" placeholder="예: 2026 프로덕트팀 봄맞이 시크릿 마니또" value="우리팀 시크릿 마니또">
+          </div>
+
+          <div class="form-group">
+            <label for="input-deadline" class="form-label">활동 기간 (선택)</label>
+            <input type="text" id="input-deadline" class="form-input" placeholder="예: 2026년 9월 10일 ~ 9월 17일 (1주일간)">
+          </div>
+
+          <div class="form-group" id="group-base-url">
+            <div class="label-with-badge">
+              <label for="input-base-url" class="form-label">🌐 공유 링크 기본 주소 (도메인)</label>
+              <span class="count-badge" id="base-url-status">자동 감지됨</span>
+            </div>
+            <input type="text" id="input-base-url" class="form-input" placeholder="예: https://... or http://192.168.x.x:5173">
+            <p class="helper-note" id="base-url-hint">
+              💡 다른 팀원들이 스마트폰이나 외부에서 접속할 수 있는 주소입니다.
+            </p>
+          </div>
+
+          <div class="form-group">
+            <div class="label-with-badge">
+              <label for="input-participants" class="form-label">참가자 명단</label>
+              <div class="badges-row">
+                <span id="participant-badge" class="count-badge">0명 입력됨</span>
+                <span id="pin-status-badge" class="count-badge pin-badge hidden">0명 PIN 암호 보호</span>
+              </div>
+            </div>
+            <textarea id="input-participants" class="form-textarea" rows="6" placeholder="참가자 이름을 줄바꿈(Enter)으로 입력하세요.&#10;&#10;💡 [보안 팁] 이름 뒤에 전화번호 뒷자리(4자리)를 적으면 본인만 열 수 있는 비밀번호가 자동 설정됩니다!&#10;예시:&#10;김철수 1234&#10;이영희 5678&#10;박민수 9012&#10;정지원 3456&#10;강다은 7890"></textarea>
+            
+            <p class="helper-note pin-guide-note">
+              🔒 <strong>개인 비밀번호(PIN) 자동 설정:</strong> 이름 뒤에 4자리 숫자(예: <code>김철수 1234</code>)를 적으면, 해당 4자리가 암호화 키로 사용되어 본인이 아니면 누구도 열어볼 수 없습니다.
+            </p>
+
+            <div class="quick-tags-toolbar">
+              <button type="button" id="btn-fill-sample" class="tag-btn">✨ 예시 팀원 6명 채우기 (PIN 포함)</button>
+              <button type="button" id="btn-clear-names" class="tag-btn danger">🗑️ 모두 지우기</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 주최자 완전 블라인드 모드 설정 카드 -->
+        <div class="glass-card blind-mode-card">
+          <div class="blind-mode-header">
+            <div class="blind-mode-info">
+              <div class="blind-icon">🙈</div>
+              <div>
+                <h3 class="blind-title">주최자도 모르는 완전 비밀(블라인드) 모드</h3>
+                <p class="blind-desc">주최자도 다른 사람의 매칭을 전혀 모른 채, 오직 본인의 마니또만 비밀리에 확인합니다.</p>
+              </div>
+            </div>
+            <label class="switch-label" title="블라인드 모드 켜기/끄기">
+              <input type="checkbox" id="chk-blind-mode" checked>
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 2단계: 비밀 미션 설정 -->
+        <div class="glass-card step-card">
+          <div class="card-header">
+            <div class="step-num">2</div>
+            <div>
+              <h2 class="card-title">마니또 비밀 미션 설정</h2>
+              <p class="card-subtitle">마니또 대상에게 몰래 수행할 특별 미션을 선택하거나 추가하세요.</p>
+            </div>
+          </div>
+
+          <div class="mission-tabs" id="mission-category-tabs">
+            <!-- 동적으로 카테고리 탭 렌더링 -->
+          </div>
+
+          <div class="mission-toolbar">
+            <div class="mission-select-status">
+              선택된 미션: <strong id="selected-mission-count">0</strong>개
+            </div>
+            <div class="mission-btn-group">
+              <button type="button" id="btn-select-all-missions" class="text-btn">전체 선택</button>
+              <button type="button" id="btn-deselect-all-missions" class="text-btn">전체 해제</button>
+            </div>
+          </div>
+
+          <!-- 미션 체크리스트 그리드 -->
+          <div class="mission-list-grid" id="mission-items-container">
+            <!-- missions.js 기반 렌더링 -->
+          </div>
+
+          <!-- 직접 미션 추가하기 -->
+          <div class="custom-mission-box">
+            <label for="input-custom-mission" class="form-label">✍️ 나만의 커스텀 미션 추가</label>
+            <div class="custom-input-group">
+              <input type="text" id="input-custom-mission" class="form-input" placeholder="새로운 미션을 직접 입력하세요 (예: 맛있는 간식 몰래 선물하기)">
+              <button type="button" id="btn-add-custom-mission" class="secondary-btn">추가</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3단계: 매칭 생성 CTA -->
+        <div class="cta-wrapper">
+          <div class="guarantee-badge">
+            🔒 <span>수학적으로 본인이 본인을 뽑지 않는 완전 순열 & 100% 개인 암호화 매칭을 보장합니다.</span>
+          </div>
+          <button type="button" id="btn-generate-matches" class="glow-cta-btn">
+            <span class="btn-sparkle">🎲</span>
+            <span>마니또 셔플 & 시크릿 링크 생성하기</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ============================================== -->
+    <!-- VIEW 2: 링크 공유 & 관리 대시보드 (#/share) -->
+    <!-- ============================================== -->
+    <section id="view-share" class="view-section">
+      <div class="share-hero">
+        <div class="success-icon">🎉</div>
+        <h1 class="hero-title">마니또 매칭이 <span class="gradient-text">완료되었습니다!</span></h1>
+        <p class="hero-desc" id="share-summary-text">
+          팀원들이 각자 본인의 마니또만 확인할 수 있도록 안전하게 암호화되었습니다.<br>
+          편한 방식으로 팀원들에게 전달해주세요!
+        </p>
+      </div>
+
+      <div class="share-container">
+
+        <!-- 🎊 [신규] 마니또 최종 릴레이 공개식 세레머니 진입 배너 -->
+        <div class="glass-card ceremony-cta-banner">
+          <div class="ceremony-banner-content">
+            <div class="ceremony-banner-icon">🎊</div>
+            <div class="ceremony-banner-text">
+              <span class="ceremony-tag">마니또 최종 발표 & 파티 타임</span>
+              <h2 class="ceremony-banner-title">마니또 릴레이 공개식 진행하기</h2>
+              <p class="ceremony-banner-desc">
+                첫 주자부터 선물 전달 ➔ 현장 비밀 미션 검증 ➔ 다음 마니또 지목으로 꼬리에 꼬리를 물며 전원이 함께 즐기는 릴레이 공개식 창을 엽니다!
+              </p>
+            </div>
+          </div>
+          <button type="button" id="btn-open-ceremony-room" class="glow-cta-btn ceremony-launch-btn">
+            <span>🚀 릴레이 공개식 시작하기</span>
+          </button>
+        </div>
+
+        <!-- 공유 방식 선택 탭 -->
+        <div class="share-tab-container">
+          <div class="share-tabs">
+            <button type="button" class="share-tab-btn active" id="tab-btn-group">
+              <span>📢 단체방 공용 링크 (추천)</span>
+            </button>
+            <button type="button" class="share-tab-btn" id="tab-btn-individual">
+              <span>👤 1:1 개별 DM 복사</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- [패널 1] 단체방 공용 링크 탭 -->
+        <div id="panel-group-share" class="share-panel active">
+          <div class="glass-card group-share-card">
+            <div class="group-share-header">
+              <div class="group-badge">🔥 가장 편리하고 안전한 방법</div>
+              <h2 class="card-title">단 하나의 링크로 단톡방에 바로 공유하세요!</h2>
+              <p class="card-subtitle">
+                아래 링크를 카카오톡, 슬랙 단톡방에 올리면, 팀원들이 각자 <strong>자기 이름을 선택하고 본인 비밀번호를 입력</strong>해 자기 결과만 확인합니다.
+              </p>
+            </div>
+
+            <div class="room-link-box-wrap">
+              <div class="room-link-display" id="room-link-display">
+                https://...
+              </div>
+              <button type="button" id="btn-copy-room-link-only" class="secondary-btn">
+                <span>🔗 링크 복사</span>
+              </button>
+            </div>
+
+            <div class="group-cta-box">
+              <button type="button" id="btn-copy-room-notice" class="glow-action-btn w-full">
+                <span>📋 단체방 안내 공지문구 원클릭 복사</span>
+              </button>
+              <p class="helper-note text-center">
+                카카오톡이나 슬랙에 바로 붙여넣을 수 있는 깔끔한 안내문이 복사됩니다.
+              </p>
+            </div>
+
+            <div class="security-guarantee-box">
+              <span class="security-shield-icon">🛡️</span>
+              <div>
+                <strong>수학적 비밀 보장:</strong>
+                링크 하나에 전체가 공유되더라도 각 참가자의 결과는 개인 PIN으로 암호화되어 있어, 타인은 물론 주최자도 본인 외의 결과를 절대 열 수 없습니다.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- [패널 2] 1:1 개별 DM 복사 탭 -->
+        <div id="panel-individual-share" class="share-panel hidden">
+          <!-- 일괄 공유 툴바 -->
+          <div class="glass-card share-actions-card">
+            <div class="share-action-left">
+              <button type="button" id="btn-copy-all-links" class="glow-action-btn">
+                <span>📋</span>
+                <span>전체 명단 링크 일괄 복사</span>
+              </button>
+              <p class="helper-note">각자 본인의 이름 옆 링크로 접속하도록 안내합니다.</p>
+            </div>
+            <div class="share-action-right">
+              <button type="button" id="btn-modify-setup" class="ghost-btn">
+                <span>✏️ 설정 수정 / 다시 뽑기</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 팀원별 개별 링크 리스트 -->
+          <div class="glass-card">
+            <div class="list-header">
+              <div>
+                <h2 class="card-title">팀원별 1:1 비밀 링크 목록</h2>
+                <p class="card-subtitle">팀원 개인에게 개별 DM으로 전달하거나 전송 완료 여부를 체크할 수 있습니다.</p>
+              </div>
+              <div class="search-wrap">
+                <input type="text" id="input-search-member" class="search-input" placeholder="🔍 팀원 이름 검색">
+              </div>
+            </div>
+
+            <div class="members-links-grid" id="members-links-container">
+              <!-- 자바스크립트로 팀원별 카드 렌더링 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 주최자 마스터 비밀 뷰 (블라인드 모드 대응) -->
+        <div class="glass-card master-spoiler-card" id="master-spoiler-card">
+          <div class="spoiler-header">
+            <div>
+              <h3 class="spoiler-title">🔒 주최자 마스터 확인 뷰</h3>
+              <p class="spoiler-subtitle" id="master-spoiler-sub">
+                마니또 주최자가 전체 매칭 상황을 점검해야 할 때만 열어보세요.
+              </p>
+            </div>
+            <button type="button" id="btn-toggle-master-view" class="secondary-btn">
+              <span id="master-toggle-icon">👁️</span>
+              <span id="master-toggle-text">전체 결과 열람하기</span>
+            </button>
+          </div>
+          <div id="master-blind-notice" class="blind-notice-box hidden">
+            <span>🙈 완전 블라인드 모드가 켜져 있어 전체 매칭이 비공개 상태입니다. (주최자도 스포일러 없이 참가 중)</span>
+          </div>
+          <div id="master-spoiler-content" class="spoiler-content hidden">
+            <div class="table-responsive">
+              <table class="master-table">
+                <thead>
+                  <tr>
+                    <th>마니또 (Giver)</th>
+                    <th>화살표</th>
+                    <th>챙겨줄 대상 (Receiver)</th>
+                    <th>비밀번호(PIN)</th>
+                    <th>부여된 미션</th>
+                  </tr>
+                </thead>
+                <tbody id="master-table-body">
+                  <!-- JS로 채워짐 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ============================================== -->
+    <!-- VIEW 5: [신규] 마니또 릴레이 공개식 세레머니 창 (#/ceremony) -->
+    <!-- ============================================== -->
+    <section id="view-ceremony" class="view-section">
+      <div class="ceremony-container">
+
+        <!-- 1) 릴레이 대기실 (시작 주자 선택) -->
+        <div id="ceremony-lobby" class="ceremony-lobby-box">
+          <div class="ceremony-hero">
+            <div class="ceremony-tag-pill">🎊 FINALE CEREMONY</div>
+            <h1 class="hero-title">마니또 <span class="gradient-text">릴레이 공개식</span></h1>
+            <p class="hero-desc">
+              선물을 전하고 미션을 확인하며 꼬리에 꼬리를 무는 실시간 릴레이 발표 세레머니!<br>
+              첫 번째로 마니또를 공개할 주자를 선택하고 시작하세요.
+            </p>
+          </div>
+
+          <div class="glass-card ceremony-starter-card">
+            <div class="starter-card-header">
+              <h2 class="card-title">첫 번째 발표 주자 선택</h2>
+              <p class="card-subtitle">선택된 주자가 첫 번째로 선물을 전달하고, 선물을 받은 사람이 다음 주자가 됩니다.</p>
+            </div>
+
+            <div class="starter-select-grid" id="ceremony-starters-grid">
+              <!-- JS 동적 렌더링 -->
+            </div>
+
+            <div class="starter-actions">
+              <button type="button" id="btn-start-ceremony-run" class="glow-cta-btn w-full">
+                <span>🎉 릴레이 공개식 시작하기</span>
+              </button>
+              <button type="button" id="btn-back-to-share" class="ghost-btn w-full text-center" style="margin-top: 10px;">
+                <span>← 공유 대시보드로 돌아가기</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2) 릴레이 진행 무대 (실시간 진행 창) -->
+        <div id="ceremony-stage" class="ceremony-stage-box hidden">
+
+          <!-- 상단 프로그레스 및 체인 표시 -->
+          <div class="ceremony-progress-header">
+            <div class="ceremony-status-row">
+              <span class="ceremony-badge-live">🔴 LIVE 릴레이 진행 중</span>
+              <div class="ceremony-step-counter">
+                진행 현황: <strong id="ceremony-current-idx">1</strong> / <strong id="ceremony-total-count">6</strong>명
+              </div>
+            </div>
+
+            <div class="ceremony-progress-bar-bg">
+              <div class="ceremony-progress-bar-fill" id="ceremony-progress-fill" style="width: 16%;"></div>
+            </div>
+
+            <!-- 현재 릴레이 순환 경로 칩 -->
+            <div class="ceremony-chain-chips" id="ceremony-chain-chips">
+              <!-- [김철수 👉] [이영희 👉] ... -->
+            </div>
+          </div>
+
+          <!-- 메인 발표 카드 -->
+          <div class="glass-card ceremony-main-card">
+
+            <!-- 발표자 헤더 -->
+            <div class="ceremony-giver-header">
+              <div class="ceremony-avatar-pulse" id="c-giver-avatar">철</div>
+              <div>
+                <span class="ceremony-role-label">🎁 오늘의 선물 발표 주자</span>
+                <h2 class="ceremony-giver-title"><span id="c-giver-name" class="giver-name-highlight">김철수</span> 님의 마니또는?</h2>
+              </div>
+            </div>
+
+            <!-- 마니또 개봉 영역 -->
+            <div class="ceremony-reveal-area">
+              <!-- 개봉 전: 물음표 상자 -->
+              <div id="c-box-unrevealed" class="c-unrevealed-box">
+                <div class="c-question-icon">❓</div>
+                <p class="c-unrevealed-text">두근두근... 과연 누구를 챙겨주었을까요?</p>
+                <button type="button" id="btn-c-reveal-target" class="glow-cta-btn">
+                  <span>🎁 마니또 대상 공개하기!</span>
+                </button>
+              </div>
+
+              <!-- 개봉 후: 대상자 스포트라이트 -->
+              <div id="c-box-revealed" class="c-revealed-box hidden">
+                <div class="c-receiver-spotlight">
+                  <div class="c-spotlight-beam"></div>
+                  <span class="c-receiver-badge">👑 SECRET TARGET</span>
+                  <div class="c-receiver-name-wrap">
+                    <span class="c-sparkle">✨</span>
+                    <span id="c-receiver-name" class="c-receiver-name">이영희</span>
+                    <span class="c-suffix">님</span>
+                    <span class="c-sparkle">✨</span>
+                  </div>
+                  <div class="c-gift-prompt">
+                    <span class="c-gift-icon">🎁</span>
+                    <span><strong><span id="c-prompt-giver">김철수</span></strong> 님이 <strong><span id="c-prompt-receiver">이영희</span></strong> 님에게 준비한 선물을 건네주세요!</span>
+                  </div>
+                </div>
+
+                <!-- 비밀 미션 및 현장 검증 카드 -->
+                <div class="ceremony-mission-card">
+                  <div class="c-mission-header">
+                    <span class="c-mission-icon">🎯</span>
+                    <div>
+                      <h3 class="c-mission-title">수행해야 했던 비밀 미션</h3>
+                      <div id="c-mission-text" class="c-mission-desc">"하루에 한 번 이상 따뜻한 칭찬 건네기"</div>
+                      <div id="c-mission-tip" class="c-mission-tip-box">💡 TIP: 자연스러운 타이밍에 건네보세요.</div>
+                    </div>
+                  </div>
+
+                  <!-- 현장 실시간 판정단 UI -->
+                  <div class="c-judgment-section" id="c-judgment-section">
+                    <div class="c-judge-question">
+                      <span>선물을 받은 <strong><span id="c-judge-receiver-name">이영희</span></strong> 님, 미션이 수행되었나요?</span>
+                    </div>
+                    <div class="c-judge-buttons">
+                      <button type="button" class="judge-btn success" id="btn-judge-success" data-result="success">
+                        <span class="judge-btn-icon">💮</span>
+                        <div class="judge-btn-text">
+                          <strong>완벽 성공!</strong>
+                          <span>감동 & 서프라이즈 성공</span>
+                        </div>
+                      </button>
+                      <button type="button" class="judge-btn effort" id="btn-judge-effort" data-result="effort">
+                        <span class="judge-btn-icon">🤔</span>
+                        <div class="judge-btn-text">
+                          <strong>노력 인정!</strong>
+                          <span>눈치는 챘지만 정성 가득</span>
+                        </div>
+                      </button>
+                      <button type="button" class="judge-btn fail" id="btn-judge-fail" data-result="fail">
+                        <span class="judge-btn-icon">😂</span>
+                        <div class="judge-btn-text">
+                          <strong>아쉬운 실패</strong>
+                          <span>미션 미수행 또는 완전 들킴</span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 판정 완료 후 날인 도장 & 다음 주자 바통 버튼 -->
+                  <div class="c-stamp-result-box hidden" id="c-stamp-result-box">
+                    <div class="stamp-mark" id="c-stamp-mark">SUCCESS</div>
+                    <div class="c-relay-next-action">
+                      <p class="c-relay-next-guide">
+                        선물을 받은 <strong><span id="c-next-giver-name">이영희</span></strong> 님이 이제 선물을 전할 차례입니다! 👉
+                      </p>
+                      <button type="button" id="btn-c-next-step" class="glow-cta-btn w-full">
+                        <span>다음 주자(<span id="c-btn-next-name">이영희</span>)에게 바통 넘기기 ➡️</span>
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 하단 대시보드 복귀 링크 -->
+          <div class="ceremony-stage-footer">
+            <button type="button" id="btn-exit-ceremony" class="text-btn">
+              <span>✕ 공개식 종료하고 대시보드로 돌아가기</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3) 릴레이 최종 피날레 화면 (Grand Finale) -->
+        <div id="ceremony-finale" class="ceremony-finale-box hidden">
+          <div class="glass-card finale-card">
+            <div class="finale-header">
+              <div class="finale-trophy">🏆</div>
+              <div class="private-badge">ALL MISSION COMPLETED</div>
+              <h1 class="hero-title">우리팀 마니또 <span class="gradient-text">릴레이 완주 성공!</span></h1>
+              <p class="hero-desc">
+                모든 팀원이 따뜻한 선물과 비밀 미션을 나누며 꼬리에 꼬리를 무는 원형 릴레이를 완벽하게 마쳤습니다! 🎊
+              </p>
+            </div>
+
+            <!-- 미션 성공 통계 요약 칩 -->
+            <div class="finale-stats-grid" id="finale-stats-grid">
+              <div class="stat-card">
+                <span class="stat-num" id="stat-success-count">0</span>
+                <span class="stat-label">💮 완벽 성공</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-num" id="stat-effort-count">0</span>
+                <span class="stat-label">🤔 노력 인정</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-num" id="stat-fail-count">0</span>
+                <span class="stat-label">😂 아쉬운 실패</span>
+              </div>
+            </div>
+
+            <!-- 전원 릴레이 히스토리 테이블 -->
+            <div class="finale-chain-history">
+              <h3 class="card-title" style="margin-bottom: 14px;">📜 우리팀 릴레이 세레머니 히스토리</h3>
+              <div class="table-responsive">
+                <table class="master-table">
+                  <thead>
+                    <tr>
+                      <th>선물 준 사람</th>
+                      <th>화살표</th>
+                      <th>선물 받은 사람</th>
+                      <th>수행 미션</th>
+                      <th>최종 판정</th>
+                    </tr>
+                  </thead>
+                  <tbody id="finale-history-tbody">
+                    <!-- JS로 채워짐 -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="finale-actions">
+              <button type="button" id="btn-restart-ceremony" class="secondary-btn">
+                <span>🔄 릴레이 처음부터 다시 진행</span>
+              </button>
+              <button type="button" id="btn-finish-ceremony" class="glow-cta-btn">
+                <span>✨ 마니또 공유 대시보드로 복귀</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- ============================================== -->
+    <!-- VIEW 4: 단체방 공용 룸 접속 화면 (#/room) -->
+    <!-- ============================================== -->
+    <section id="view-room" class="view-section">
+      <div class="room-landing-container">
+        <div class="room-hero">
+          <div class="private-badge">🎁 우리팀 시크릿 마니또 초대장</div>
+          <h1 class="reveal-title" id="room-view-title">우리팀 시크릿 마니또</h1>
+          <p class="reveal-subtitle" id="room-view-info">쉿! 본인의 이름을 선택하여 마니또 대상을 확인하세요.</p>
+        </div>
+
+        <div class="glass-card room-selection-card">
+          <div class="room-card-header">
+            <h2 class="card-title">누구신가요? 본인의 이름을 탭하세요</h2>
+            <p class="card-subtitle">본인 확인(비밀번호 입력) 후 마니또 대상과 비밀 미션이 공개됩니다.</p>
+          </div>
+
+          <div class="room-members-grid" id="room-members-grid">
+            <!-- JS 동적 렌더링: [김철수 🔒], [이영희 🔒] ... -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ============================================== -->
+    <!-- VIEW 3: 참가자 마니또 개봉 & 결과 화면 (#/reveal) -->
+    <!-- ============================================== -->
+    <section id="view-reveal" class="view-section">
+      <div class="reveal-container">
+        
+        <!-- 상단 환영 헤더 -->
+        <div class="reveal-header">
+          <div class="private-badge">🔒 본인 전용 시크릿 페이지</div>
+          <h1 class="reveal-title">반가워요, <span id="reveal-giver-name" class="giver-name-highlight">팀원</span> 님!</h1>
+          <p class="reveal-subtitle" id="reveal-room-info">우리팀 시크릿 마니또</p>
+        </div>
+
+        <!-- [보안 잠금 게이트] 본인 확인 및 PIN 입력 레이어 -->
+        <div id="reveal-pin-gate" class="pin-gate-wrap hidden">
+          <div class="glass-card pin-gate-card">
+            <div class="pin-icon-wrap">🔒</div>
+            <div class="pin-gate-badge">개인 비밀번호 잠금</div>
+            <h2 class="pin-gate-title">본인 확인이 필요합니다</h2>
+            <p class="pin-gate-desc">
+              <strong id="pin-target-user-name" class="giver-name-highlight">팀원</strong> 님 본인만 결과를 볼 수 있도록 암호화되어 있습니다.<br>
+              <strong>4자리 비밀번호(전화번호 뒷자리 등)</strong>를 입력해주세요.
+            </p>
+
+            <div class="pin-display">
+              <div class="pin-dot" id="p-dot-0"></div>
+              <div class="pin-dot" id="p-dot-1"></div>
+              <div class="pin-dot" id="p-dot-2"></div>
+              <div class="pin-dot" id="p-dot-3"></div>
+            </div>
+
+            <div id="pin-error-text" class="pin-error-text hidden">
+              ❌ 비밀번호가 일치하지 않습니다. 다시 입력해주세요.
+            </div>
+
+            <!-- 모바일/데스크톱 가상 키패드 -->
+            <div class="pin-keypad" id="pin-keypad">
+              <button type="button" class="key-btn" data-key="1">1</button>
+              <button type="button" class="key-btn" data-key="2">2</button>
+              <button type="button" class="key-btn" data-key="3">3</button>
+              <button type="button" class="key-btn" data-key="4">4</button>
+              <button type="button" class="key-btn" data-key="5">5</button>
+              <button type="button" class="key-btn" data-key="6">6</button>
+              <button type="button" class="key-btn" data-key="7">7</button>
+              <button type="button" class="key-btn" data-key="8">8</button>
+              <button type="button" class="key-btn" data-key="9">9</button>
+              <button type="button" class="key-btn key-clear" data-key="clear">취소</button>
+              <button type="button" class="key-btn" data-key="0">0</button>
+              <button type="button" class="key-btn key-backspace" data-key="back">⌫</button>
+            </div>
+
+            <p class="helper-note text-center" style="margin-top: 14px;">
+              💡 주최자에게 전달받은 본인의 4자리 번호(전화번호 뒷자리 등)입니다.
+            </p>
+          </div>
+        </div>
+
+        <!-- 인터랙티브 개봉 모드 토글 (PIN 해제 후 노출) -->
+        <div id="reveal-content-stage" class="reveal-stage-area">
+          <div class="reveal-mode-selector">
+            <span class="mode-label">개봉 방식:</span>
+            <div class="mode-pill-group">
+              <button type="button" id="btn-mode-scratch" class="mode-pill active">🪙 스크래치 긁기</button>
+              <button type="button" id="btn-mode-unbox" class="mode-pill">🎁 선물상자 열기</button>
+            </div>
+          </div>
+
+          <!-- 인터랙티브 개봉 스테이지 -->
+          <div class="interactive-stage" id="interactive-stage">
+
+            <!-- 1) 스크래치 복권 모드 -->
+            <div id="scratch-box-wrap" class="scratch-wrap">
+              <div class="scratch-ticket-card">
+                <!-- 스크래치 캔버스 바로 아래 깔려 있는 실제 결과 레이어 -->
+                <div class="scratch-under-layer">
+                  <div class="scratch-under-badge">👑 MY SECRET TARGET</div>
+                  <div class="scratch-under-label">내가 몰래 챙겨줄 마니또 대상</div>
+                  <div class="scratch-under-name-box">
+                    <span class="sparkle-icon">✨</span>
+                    <span id="scratch-under-target" class="scratch-target-text">이영희</span>
+                    <span class="scratch-target-suffix">님</span>
+                    <span class="sparkle-icon">✨</span>
+                  </div>
+                  <div class="scratch-under-mission-box">
+                    <div class="mission-mini-tag">🎯 비밀 미션 지령</div>
+                    <div id="scratch-under-mission" class="scratch-mission-text">"하루에 한 번 이상 따뜻한 칭찬 건네기"</div>
+                  </div>
+                  <div class="scratch-under-hint">✨ 계속 긁어서 미션을 완전히 해제하세요! ✨</div>
+                </div>
+
+                <!-- 위에 덮여 긁히는 골드 홀로그램 캔버스 레이어 -->
+                <canvas id="scratch-canvas" class="scratch-canvas"></canvas>
+              </div>
+              <p class="stage-guide-text">👆 골드 카드를 손가락이나 마우스로 긁어 이름을 확인하세요!</p>
+            </div>
+
+            <!-- 2) 선물상자 개봉 모드 -->
+            <div id="unbox-box-wrap" class="unbox-wrap hidden">
+              <div class="gift-box" id="interactive-gift-box">
+                <div class="gift-lid">
+                  <div class="gift-ribbon-bow">🎀</div>
+                  <div class="gift-lid-base"></div>
+                </div>
+                <div class="gift-body">
+                  <div class="gift-ribbon-v"></div>
+                  <div class="gift-ribbon-h"></div>
+                  <div class="gift-tag">FOR YOU</div>
+                </div>
+              </div>
+              <p class="stage-guide-text">👆 선물 상자를 터치하여 마니또를 개봉하세요!</p>
+            </div>
+
+            <!-- 3) 개봉 후 드러나는 마니또 결과 카드 -->
+            <div id="revealed-result-card" class="result-card hidden">
+              <div class="result-card-glow"></div>
+              
+              <div class="card-tag">SECRET MISSION CARD</div>
+              <h2 class="result-card-title">나의 마니또 지령서</h2>
+
+              <!-- 챙겨줄 대상 -->
+              <div class="target-box">
+                <div class="target-label">👑 내가 몰래 챙겨줄 마니또 대상</div>
+                <div class="target-name-wrap">
+                  <span class="target-sparkle">✨</span>
+                  <span id="result-target-name" class="target-name">이영희</span>
+                  <span class="target-suffix">님</span>
+                  <span class="target-sparkle">✨</span>
+                </div>
+              </div>
+
+              <!-- 비밀 미션 -->
+              <div class="mission-box">
+                <div class="mission-label">🎯 나의 비밀 미션</div>
+                <div id="result-mission-text" class="result-mission-text">
+                  "하루에 한 번 이상 따뜻한 칭찬 건네기"
+                </div>
+                <div id="result-mission-tip" class="result-mission-tip">
+                  💡 TIP: 상대방이 눈치채지 못하게 자연스러운 타이밍을 노려보세요.
+                </div>
+              </div>
+
+              <!-- 활동 기간 안내 -->
+              <div id="result-deadline-wrap" class="deadline-box hidden">
+                ⏰ <span id="result-deadline-text">활동 기간</span>
+              </div>
+
+              <!-- 미션 수행 팁 -->
+              <div class="rules-tip-box">
+                <div class="tip-title">🤫 마니또 3대 수칙</div>
+                <ul class="tip-list">
+                  <li>마니또 종료 전까지 누구에게도 대상을 발설하지 않기</li>
+                  <li>티 나지 않게 자연스럽고 은밀하게 미션 수행하기</li>
+                  <li>동료에게 따뜻한 에너지를 선물하고 함께 즐기기</li>
+                </ul>
+              </div>
+
+              <!-- 카드 하단 액션 버튼들 -->
+              <div class="result-actions">
+                <button type="button" id="btn-save-image-card" class="action-btn download">
+                  <span>📸</span>
+                  <span>결과 카드 이미지로 저장</span>
+                </button>
+                <button type="button" id="btn-privacy-shield" class="action-btn shield">
+                  <span>🙈</span>
+                  <span>사생활 보호 (다시 가리기)</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- 하단 홈으로 가기 -->
+        <div class="reveal-footer">
+          <a href="#/setup" class="link-to-home">✨ 나도 우리팀 마니또 방 만들기</a>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 사생활 보호 블러 오버레이 (동료가 다가올 때 누르는 방패) -->
+  <div id="privacy-shield-overlay" class="privacy-overlay hidden">
+    <div class="privacy-modal">
+      <div class="privacy-icon">🙈</div>
+      <h3>사생활 보호 모드 작동 중</h3>
+      <p>주변에 동료가 있어 화면을 안전하게 가렸습니다.<br>혼자 있을 때 아래 버튼을 눌러 다시 열어보세요.</p>
+      <button type="button" id="btn-unlock-privacy" class="glow-cta-btn">
+        <span>👁️ 탭하여 다시 확인하기</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 사용 가이드 모달 -->
+  <div id="guide-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title">📖 시크릿 마니또 이용 가이드</h2>
+        <button type="button" id="btn-close-guide" class="close-btn" aria-label="닫기">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="guide-item">
+          <h3>1. 각자 본인만 아는 완전 비밀 시스템</h3>
+          <p>
+            팀원 명단 입력 시 전화번호 뒷자리나 사번(4자리)을 적으면, 각자의 결과가 <strong>해당 비밀번호로 수학적 암호화</strong>됩니다.
+            따라서 타인은 물론 주최자조차도 본인 비밀번호 없이는 결과를 열어볼 수 없습니다.
+          </p>
+        </div>
+        <div class="guide-item">
+          <h3>2. 주최자 블라인드(Blind) 모드</h3>
+          <p>
+            주최자 본인도 마니또 게임에 즐겁게 참여할 수 있도록, 주최자 화면에서도 전체 매칭 결과가 비공개 처리됩니다. 주최자도 본인 링크로만 본인의 대상을 확인합니다.
+          </p>
+        </div>
+        <div class="guide-item">
+          <h3>3. 단톡방 공용 링크 vs 1:1 개별 DM 공유</h3>
+          <p>
+            - <strong>단톡방 공용 링크 (추천)</strong>: 링크 1개만 단톡방에 올리면, 팀원들이 자기 이름을 누르고 비밀번호를 입력해 확인합니다.<br>
+            - <strong>1:1 개별 DM 복사</strong>: 개별 카드의 DM 문구를 복사하여 팀원에게 안전하게 1:1로 전달할 수 있습니다.
+          </p>
+        </div>
+        <div class="guide-item">
+          <h3>4. 본인 뽑기 방지 완전 순열 알고리즘</h3>
+          <p>
+            수학적 단일 순환(Hamiltonian Cycle) 알고리즘을 적용하여 본인을 뽑거나 둘만의 갇힌 맞교환(A↔B)이 생기지 않고 모든 인원이 하나의 원으로 이어집니다.
+          </p>
+        </div>
+        <div class="guide-item">
+          <h3>5. 마니또 릴레이 공개식 세레머니</h3>
+          <p>
+            행사가 끝나는 날, <strong>[마니또 릴레이 공개식]</strong>을 실행하여 빔프로젝터나 모임 화면에 띄워두고 선물 전달과 미션 검증을 꼬리에 꼬리를 물며 진행해보세요!
+          </p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-confirm-guide" class="primary-mini-btn w-full">확인했습니다</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 알림 컨테이너 -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- 앱 진입점 모듈 스크립트 -->
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
