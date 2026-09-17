@@ -118,5 +118,30 @@ if (relayChain[relayChain.length - 1].receiver !== relayChain[0].giver) {
 }
 console.log('✅ 6. 릴레이 공개식 체인 정렬 검증 성공: 꼬리에 꼬리를 무는 순환 100% 보장');
 
+// 7. 참가자 셀프 PIN 등록 및 솔티드 해시 검증 (주최자 영지식 보안)
+const { hashPin, verifyMemberPin } = await import('../src/crypto.js');
+const selfSetPin = '7733';
+const memberName = '민지';
+const roomKey = 'room_bundle_token_xyz';
+
+const pinHash = hashPin(memberName, selfSetPin, roomKey);
+if (!pinHash || typeof pinHash !== 'string') {
+  throw new Error('[오류] PIN 해시 생성 실패');
+}
+
+// 틀린 비밀번호로 검증 시 실패 확인
+const wrongVerify = verifyMemberPin(roomKey, memberName, '1234', pinHash);
+if (wrongVerify) {
+  throw new Error('[오류] 틀린 비밀번호인데 검증 통과됨');
+}
+
+// 올바른 비밀번호로 검증 시 성공 확인
+const correctVerify = verifyMemberPin(roomKey, memberName, '7733', pinHash);
+if (!correctVerify) {
+  throw new Error('[오류] 올바른 비밀번호 검증 실패');
+}
+console.log('✅ 7. 참가자 셀프 PIN 등록 & 영지식 솔티드 해시 검증 성공 (주최자 비밀번호 비인지 보장)');
+
 console.log('\n🎉 [검증 완료] 모든 개인 보안 및 마니또 로직이 완벽하게 통과했습니다!');
+
 

@@ -11,7 +11,10 @@ import {
   inspectToken, 
   encodeRoomBundle, 
   inspectRoomBundle, 
-  decodeMemberFromBundle 
+  decodeMemberFromBundle,
+  getLocalMemberPinHash,
+  setLocalMemberPinHash,
+  verifyMemberPin
 } from './crypto.js';
 import { createManitoMatch, parseParticipantsInput, buildRelayChain } from './matcher.js';
 import { sound } from './sound.js';
@@ -30,11 +33,15 @@ class ManitoApp {
     this.activeRevealMode = 'scratch';
     this.sentStatus = JSON.parse(localStorage.getItem('manito_sent_status') || '{}');
 
-    // PIN 보안 관련 상태
+    // PIN 보안 관련 상태 (영지식 셀프 등록 지원)
     this.pendingToken = null;
     this.pendingRoomToken = null;
     this.pendingMemberName = null;
     this.currentPin = '';
+    this.pinSetupMode = false;
+    this.pinSetupStep = 1;
+    this.pinFirstInput = '';
+    this.expectedPinHash = '';
 
     // 릴레이 공개식 세레머니 상태
     this.ceremonyChain = [];
@@ -215,22 +222,22 @@ class ManitoApp {
       });
     }
 
-    // 예시 팀원 채우기 (PIN 포함)
+    // 예시 팀원 채우기
     const btnFillSample = document.getElementById('btn-fill-sample');
     if (btnFillSample && inputParticipants) {
       btnFillSample.addEventListener('click', () => {
         sound.playPop();
         const sampleNames = [
-          '김철수 1234',
-          '이영희 5678',
-          '박민수 9012',
-          '정지원 3456',
-          '강다은 7890',
-          '최현우 2468'
+          '민지',
+          '준호',
+          '서연',
+          '지훈',
+          '하은',
+          '수빈'
         ];
         inputParticipants.value = sampleNames.join('\n');
         this.updateParticipantCount();
-        this.showToast('✨ 예시 팀원 6명(비밀번호 포함)이 입력되었습니다.');
+        this.showToast('✨ 예시 팀원 6명이 입력되었습니다.');
       });
     }
 
@@ -1281,16 +1288,17 @@ class ManitoApp {
 
     const inspected = inspectRoomBundle(roomToken);
     const member = inspected.members?.find(m => m.name === memberName);
+    const existingPinHash = getLocalMemberPinHash(roomToken, memberName);
 
     if (member && member.hasPin) {
-      this.showPinGate(memberName);
+      // 주최자가 사전에 PIN을 정했던 경우 (하위 호환)
+      this.showPinGate(memberName, false, '');
+    } else if (existingPinHash) {
+      // 이미 본인 비밀번호를 설정한 경우 -> 잠금 해제 입력
+      this.showPinGate(memberName, false, existingPinHash);
     } else {
-      const res = decodeMemberFromBundle(roomToken, memberName);
-      if (res.success) {
-        this.displayRevealResult(res.data);
-      } else {
-        alert(res.error || '복호화 실패');
-      }
+      // 아직 비밀번호가 등록되지 않은 신규 참가자 -> 본인 비밀번호 셀프 등록 모드!
+      this.showPinGate(memberName, true, '');
     }
   }
 
@@ -1309,20 +1317,24 @@ class ManitoApp {
       return;
     }
 
+    this.pendingMemberName = inspected.giver;
+    const existingPinHash = getLocalMemberPinHash('single', inspected.giver);
+
     if (inspected.hasPin) {
-      this.showPinGate(inspected.giver);
+      this.showPinGate(inspected.giver, false, '');
+    } else if (existingPinHash) {
+      this.showPinGate(inspected.giver, false, existingPinHash);
     } else {
-      const res = decodeToken(token);
-      if (res.success) {
-        this.displayRevealResult(res.data);
-      } else {
-        alert(res.error || '복호화 실패');
-      }
+      this.showPinGate(inspected.giver, true, '');
     }
   }
 
-  showPinGate(memberName) {
+  showPinGate(memberName, isSetupMode = false, expectedHash = '') {
     this.currentPin = '';
+    this.pinSetupMode = isSetupMode;
+    this.pinSetupStep = 1;
+    this.pinFirstInput = '';
+    this.expectedPinHash = expectedHash;
     this.updatePinDots();
 
     const gate = document.getElementById('reveal-pin-gate');
@@ -1337,6 +1349,42 @@ class ManitoApp {
 
     const giverNameEl = document.getElementById('reveal-giver-name');
     if (giverNameEl) giverNameEl.textContent = memberName;
+
+    const badgeEl = document.getElementById('pin-gate-badge');
+    const titleEl = document.getElementById('pin-gate-title');
+    const descEl = document.getElementById('pin-gate-desc');
+    const stepGuide = document.getElementById('pin-step-guide');
+    const footerHint = document.getElementById('pin-footer-hint');
+    const iconWrap = document.getElementById('pin-icon-wrap');
+
+    if (isSetupMode) {
+      if (iconWrap) iconWrap.textContent = '✨';
+      if (badgeEl) badgeEl.textContent = '🔒 본인 비밀번호 신규 설정';
+      if (titleEl) titleEl.textContent = `${memberName}님, 비밀번호를 설정해주세요`;
+      if (descEl) {
+        descEl.innerHTML = `
+          오직 <strong>${memberName}</strong>님만 마니또를 열어볼 수 있도록 <strong>본인만의 4자리 비밀번호</strong>를 등록합니다.<br>
+          <span style="color: var(--accent-amber); font-size: 0.85rem;">※ 주최자나 타인은 이 비밀번호를 절대 알 수 없습니다.</span>
+        `;
+      }
+      if (stepGuide) {
+        stepGuide.textContent = '✨ 1단계: 사용할 4자리 비밀번호를 입력해주세요';
+        stepGuide.classList.remove('hidden');
+      }
+      if (footerHint) footerHint.textContent = '💡 앞으로 본인 마니또를 확인할 때 사용할 4자리 번호입니다.';
+    } else {
+      if (iconWrap) iconWrap.textContent = '🔒';
+      if (badgeEl) badgeEl.textContent = '🔒 개인 비밀번호 확인';
+      if (titleEl) titleEl.textContent = '본인 확인이 필요합니다';
+      if (descEl) {
+        descEl.innerHTML = `
+          <strong>${memberName}</strong>님 본인만 결과를 볼 수 있도록 암호화되어 있습니다.<br>
+          설정하신 <strong>4자리 비밀번호</strong>를 입력해주세요.
+        `;
+      }
+      if (stepGuide) stepGuide.classList.add('hidden');
+      if (footerHint) footerHint.textContent = '💡 본인만 알 수 있는 4자리 비밀번호입니다. (주최자도 알 수 없습니다)';
+    }
   }
 
   handlePinKeyInput(key) {
@@ -1344,6 +1392,12 @@ class ManitoApp {
 
     if (key === 'clear') {
       this.currentPin = '';
+      if (this.pinSetupMode && this.pinSetupStep === 2) {
+        this.pinSetupStep = 1;
+        this.pinFirstInput = '';
+        const stepGuide = document.getElementById('pin-step-guide');
+        if (stepGuide) stepGuide.textContent = '✨ 1단계: 사용할 4자리 비밀번호를 입력해주세요';
+      }
     } else if (key === 'back') {
       this.currentPin = this.currentPin.slice(0, -1);
     } else if (key >= '0' && key <= '9') {
@@ -1371,16 +1425,101 @@ class ManitoApp {
   }
 
   verifyAndUnlockPin(pin) {
-    let result = null;
+    const errorText = document.getElementById('pin-error-text');
+    const gateCard = document.querySelector('.pin-gate-card');
+    const stepGuide = document.getElementById('pin-step-guide');
 
+    // 1. 신규 셀프 비밀번호 설정 모드인 경우
+    if (this.pinSetupMode) {
+      if (this.pinSetupStep === 1) {
+        // 1단계 완료 -> 2단계(확인 재입력)로 이동
+        sound.playChime();
+        this.pinFirstInput = pin;
+        this.pinSetupStep = 2;
+        this.currentPin = '';
+        this.updatePinDots();
+        if (errorText) errorText.classList.add('hidden');
+        if (stepGuide) stepGuide.textContent = '✨ 2단계: 확인을 위해 한 번 더 입력해주세요';
+        return;
+      } else if (this.pinSetupStep === 2) {
+        // 2단계 완료 -> 두 입력값 일치 여부 검사
+        if (pin === this.pinFirstInput) {
+          // 일치! 로컬스토리지에 해시 저장
+          const roomKey = this.pendingRoomToken || 'single';
+          setLocalMemberPinHash(roomKey, this.pendingMemberName, pin);
+
+          // 데이터 복호화 진행
+          let result = null;
+          if (this.pendingRoomToken && this.pendingMemberName) {
+            result = decodeMemberFromBundle(this.pendingRoomToken, this.pendingMemberName, pin);
+          } else if (this.pendingToken) {
+            result = decodeToken(this.pendingToken, pin);
+          }
+
+          if (result && result.success) {
+            sound.playFanfare();
+            if (this.confetti) this.confetti.fire(120);
+            if (errorText) errorText.classList.add('hidden');
+
+            const gate = document.getElementById('reveal-pin-gate');
+            const stage = document.getElementById('reveal-content-stage');
+            if (gate) gate.classList.add('hidden');
+            if (stage) stage.classList.remove('hidden');
+
+            this.showToast(`🎉 ${this.pendingMemberName}님의 4자리 비밀번호가 안전하게 등록되었습니다!`);
+            this.displayRevealResult(result.data);
+            return;
+          }
+        }
+
+        // 불일치 시
+        sound.playPop();
+        if (errorText) {
+          errorText.textContent = '❌ 비밀번호가 일치하지 않습니다. 처음부터 다시 설정해주세요.';
+          errorText.classList.remove('hidden');
+        }
+        if (gateCard) {
+          gateCard.classList.remove('shake');
+          void gateCard.offsetWidth;
+          gateCard.classList.add('shake');
+        }
+        this.pinSetupStep = 1;
+        this.pinFirstInput = '';
+        this.currentPin = '';
+        this.updatePinDots();
+        if (stepGuide) stepGuide.textContent = '✨ 1단계: 사용할 4자리 비밀번호를 입력해주세요';
+        return;
+      }
+    }
+
+    // 2. 이미 등록된 비밀번호 확인(잠금 해제) 모드인 경우
+    if (this.expectedPinHash) {
+      const roomKey = this.pendingRoomToken || 'single';
+      const isValid = verifyMemberPin(roomKey, this.pendingMemberName, pin, this.expectedPinHash);
+      if (!isValid) {
+        sound.playPop();
+        if (errorText) {
+          errorText.textContent = '❌ 비밀번호가 일치하지 않습니다. 다시 확인해주세요.';
+          errorText.classList.remove('hidden');
+        }
+        if (gateCard) {
+          gateCard.classList.remove('shake');
+          void gateCard.offsetWidth;
+          gateCard.classList.add('shake');
+        }
+        this.currentPin = '';
+        this.updatePinDots();
+        return;
+      }
+    }
+
+    // 복호화 실행
+    let result = null;
     if (this.pendingRoomToken && this.pendingMemberName) {
       result = decodeMemberFromBundle(this.pendingRoomToken, this.pendingMemberName, pin);
     } else if (this.pendingToken) {
       result = decodeToken(this.pendingToken, pin);
     }
-
-    const errorText = document.getElementById('pin-error-text');
-    const gateCard = document.querySelector('.pin-gate-card');
 
     if (result && result.success) {
       sound.playFanfare();

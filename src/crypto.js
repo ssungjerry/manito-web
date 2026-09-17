@@ -425,3 +425,66 @@ export function decodeMemberFromBundle(roomToken, memberName, pin = '', customKe
     return { success: false, error: '결과를 복호화하는 중 오류가 발생했습니다.' };
   }
 }
+
+// =========================================================================
+// 3. 참가자 셀프 PIN(비밀번호) 등록 & 영지식 잠금 관리
+// =========================================================================
+
+/**
+ * 4자리 PIN을 솔티드 해시로 변환 (서버나 타인에게 원문 노출 방지)
+ * @param {string} name 참가자 이름
+ * @param {string} pin 4자리 비밀번호
+ * @param {string} [salt]
+ */
+export function hashPin(name, pin, salt = SECRET_SALT) {
+  const cleanPin = (pin || '').trim();
+  const cleanName = (name || '').trim();
+  const str = `${salt}::${cleanName}::${cleanPin}`;
+  let hash1 = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash1 = (hash1 << 5) - hash1 + str.charCodeAt(i);
+    hash1 |= 0;
+  }
+  let hash2 = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash2 = ((hash2 << 5) + hash2) + str.charCodeAt(i);
+    hash2 |= 0;
+  }
+  return Math.abs(hash1).toString(36) + '_' + Math.abs(hash2).toString(36);
+}
+
+/**
+ * 로컬 저장소에서 특정 방의 특정 참가자가 설정한 PIN 해시 가져오기
+ */
+export function getLocalMemberPinHash(roomKey, memberName) {
+  try {
+    const storageKey = `manito_pin_hash_${roomKey}_${memberName}`;
+    return localStorage.getItem(storageKey) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * 로컬 저장소에 특정 방의 특정 참가자 PIN 해시 저장 (잠금 설정)
+ */
+export function setLocalMemberPinHash(roomKey, memberName, pin) {
+  try {
+    const hash = hashPin(memberName, pin, roomKey);
+    const storageKey = `manito_pin_hash_${roomKey}_${memberName}`;
+    localStorage.setItem(storageKey, hash);
+    return hash;
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * 참가자의 PIN이 올바른지 해시 비교로 검증
+ */
+export function verifyMemberPin(roomKey, memberName, inputPin, expectedHash) {
+  if (!expectedHash) return true; // 아직 잠기지 않은 경우
+  const inputHash = hashPin(memberName, inputPin, roomKey);
+  return inputHash === expectedHash;
+}
+

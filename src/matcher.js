@@ -5,12 +5,14 @@
  */
 
 /**
- * 참가자 텍스트 입력값을 파싱하여 이름과 PIN(비밀번호 4자리) 객체 배열로 변환
+ * 참가자 텍스트 입력값을 파싱하여 이름과 PIN(선택적) 객체 배열로 변환
+ * 주최자는 비밀번호를 알 필요 없이 이름만 입력하면 되며,
+ * 각 참가자가 링크에 접속해 본인만의 비밀번호를 직접 등록합니다.
+ * 
  * 지원 형태:
- * - 김철수
- * - 김철수 1234
- * - 김철수(1234) or 김철수 (1234)
- * - 김철수, 1234 or 김철수: 1234 or 김철수 / 1234
+ * - 민지
+ * - 준호, 서연, 지훈
+ * - 하은
  * 
  * @param {string} rawInput 
  * @returns {Array<{ name: string, pin: string }>}
@@ -18,7 +20,6 @@
 export function parseParticipantsInput(rawInput) {
   if (!rawInput || typeof rawInput !== 'string') return [];
 
-  // 줄바꿈 또는 쉼표(단, 이름 뒤 4자리 숫자 앞의 쉼표는 라인 분리 전 처리)
   const lines = rawInput
     .split(/\r?\n/)
     .map(line => line.trim())
@@ -28,15 +29,13 @@ export function parseParticipantsInput(rawInput) {
   const nameSet = new Set();
 
   for (const line of lines) {
-    // 쉼표로 여러 명이 한 줄에 들어온 경우 (예: "김철수 1234, 이영희 5678, 박민수")
-    // 단, 한 줄에 콤마가 여러 개 있고 이름들이 나열되어 있을 수 있으므로 분리 검토
-    const subParts = line.includes(',') && !line.match(/^[^\,]+\,\s*\d{3,6}$/)
-      ? line.split(',').map(s => s.trim()).filter(s => s.length > 0)
+    // 쉼표 뒤에 숫자가 바로 오는 형태(예: "박민수, 9999")는 한 사람의 이름과 PIN이므로 분리하지 않음
+    const subParts = line.includes(',') && !line.match(/^[^\,]+\,\s*\d{3,8}\s*$/)
+      ? line.split(/[,/]+/).map(s => s.trim()).filter(s => s.length > 0)
       : [line];
 
     for (const part of subParts) {
-      // 이름 뒤에 4자리 이상 숫자가 있는지 검사
-      // 예: "김철수 (1234)", "김철수 1234", "김철수,1234", "김철수:1234", "김철수/1234"
+      // 혹시 이름 뒤에 숫자가 붙어있더라도 깔끔하게 파싱 지원
       const pinMatch = part.match(/^([^\d\(\,\:\/]+?)(?:[\s\(\,\:\/]+(\d{3,8}))?[\)\s]*$/);
       let name = '';
       let pin = '';
@@ -48,7 +47,6 @@ export function parseParticipantsInput(rawInput) {
         name = part.trim();
       }
 
-      // 괄호가 남아있는 경우 정리
       name = name.replace(/[\(\)\[\]\{\}]/g, '').trim();
 
       if (name.length > 0 && !nameSet.has(name)) {

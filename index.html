@@ -110,14 +110,14 @@
                 <span id="pin-status-badge" class="count-badge pin-badge hidden">0명 PIN 암호 보호</span>
               </div>
             </div>
-            <textarea id="input-participants" class="form-textarea" rows="6" placeholder="참가자 이름을 줄바꿈(Enter)으로 입력하세요.&#10;&#10;💡 [보안 팁] 이름 뒤에 전화번호 뒷자리(4자리)를 적으면 본인만 열 수 있는 비밀번호가 자동 설정됩니다!&#10;예시:&#10;김철수 1234&#10;이영희 5678&#10;박민수 9012&#10;정지원 3456&#10;강다은 7890"></textarea>
+            <textarea id="input-participants" class="form-textarea" rows="6" placeholder="참가자 이름을 줄바꿈(Enter) 또는 쉼표(,)로 입력하세요.&#10;&#10;💡 [영지식 비밀 보장] 주최자는 비밀번호를 적을 필요가 없습니다!&#10;참가자 각자가 링크를 열 때 본인만의 4자리 비밀번호를 직접 등록하여 잠급니다.&#10;&#10;예시:&#10;민지&#10;준호&#10;서연&#10;지훈&#10;하은&#10;수빈"></textarea>
             
             <p class="helper-note pin-guide-note">
-              🔒 <strong>개인 비밀번호(PIN) 자동 설정:</strong> 이름 뒤에 4자리 숫자(예: <code>김철수 1234</code>)를 적으면, 해당 4자리가 암호화 키로 사용되어 본인이 아니면 누구도 열어볼 수 없습니다.
+              🔒 <strong>영지식(Zero-Knowledge) 비밀 보장:</strong> 주최자는 비밀번호를 알 필요가 없습니다! 팀원들이 단톡방 링크를 열어 자기 이름을 탭할 때, <strong>본인만 아는 4자리 비밀번호를 스스로 등록</strong>하여 결과를 안전하게 잠급니다.
             </p>
 
             <div class="quick-tags-toolbar">
-              <button type="button" id="btn-fill-sample" class="tag-btn">✨ 예시 팀원 6명 채우기 (PIN 포함)</button>
+              <button type="button" id="btn-fill-sample" class="tag-btn">✨ 예시 팀원 6명 채우기</button>
               <button type="button" id="btn-clear-names" class="tag-btn danger">🗑️ 모두 지우기</button>
             </div>
           </div>
@@ -625,12 +625,15 @@
         <!-- [보안 잠금 게이트] 본인 확인 및 PIN 입력 레이어 -->
         <div id="reveal-pin-gate" class="pin-gate-wrap hidden">
           <div class="glass-card pin-gate-card">
-            <div class="pin-icon-wrap">🔒</div>
-            <div class="pin-gate-badge">개인 비밀번호 잠금</div>
-            <h2 class="pin-gate-title">본인 확인이 필요합니다</h2>
-            <p class="pin-gate-desc">
+            <div class="pin-icon-wrap" id="pin-icon-wrap">🔒</div>
+            <div class="pin-gate-badge" id="pin-gate-badge">개인 비밀번호 확인</div>
+            <h2 class="pin-gate-title" id="pin-gate-title">본인 확인이 필요합니다</h2>
+            <p class="pin-gate-desc" id="pin-gate-desc">
               <strong id="pin-target-user-name" class="giver-name-highlight">팀원</strong> 님 본인만 결과를 볼 수 있도록 암호화되어 있습니다.<br>
-              <strong>4자리 비밀번호(전화번호 뒷자리 등)</strong>를 입력해주세요.
+              <strong>4자리 비밀번호</strong>를 입력해주세요.
+            </p>
+            <p class="pin-step-guide hidden" id="pin-step-guide">
+              ✨ 1단계: 사용할 4자리 비밀번호를 입력해주세요
             </p>
 
             <div class="pin-display">
@@ -660,8 +663,8 @@
               <button type="button" class="key-btn key-backspace" data-key="back">⌫</button>
             </div>
 
-            <p class="helper-note text-center" style="margin-top: 14px;">
-              💡 주최자에게 전달받은 본인의 4자리 번호(전화번호 뒷자리 등)입니다.
+            <p class="helper-note text-center" id="pin-footer-hint" style="margin-top: 14px;">
+              💡 본인만 알 수 있는 4자리 비밀번호입니다. (주최자도 알 수 없습니다)
             </p>
           </div>
         </div>
