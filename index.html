@@ -42,6 +42,10 @@
         <span class="logo-badge">Secret</span>
       </a>
       <div class="header-actions">
+        <button type="button" id="btn-db-status" class="db-status-btn" title="클라우드 DB 연동 설정" aria-label="클라우드 DB 설정">
+          <span class="db-dot" id="db-dot"></span>
+          <span id="db-status-text">☁️ 클라우드 DB</span>
+        </button>
         <button type="button" id="btn-sound-toggle" class="icon-btn" title="효과음 켜기/끄기" aria-label="효과음 전환">
           <span id="sound-icon">🔊</span>
         </button>
@@ -140,6 +144,25 @@
           </div>
         </div>
 
+        <!-- ☁️ 실시간 클라우드 DB 연동 배너 카드 (본문에서도 바로 확인 가능) -->
+        <div class="glass-card db-setup-banner-card">
+          <div class="db-banner-left">
+            <div class="db-banner-icon-pulse">☁️</div>
+            <div>
+              <div class="title-with-badge">
+                <h3 class="db-banner-title">실시간 클라우드 DB 연동</h3>
+                <span class="db-status-pill" id="setup-db-status-pill">💾 로컬 모드</span>
+              </div>
+              <p class="db-banner-desc">
+                팀원들이 비밀번호를 설정했을 때 실시간으로 잠금 상태를 동기화하려면 Firebase DB를 연결하세요.
+              </p>
+            </div>
+          </div>
+          <button type="button" id="btn-open-db-from-setup" class="secondary-btn db-banner-btn">
+            <span>⚙️ 클라우드 DB 설정 열기</span>
+          </button>
+        </div>
+
         <!-- 2단계: 비밀 미션 설정 -->
         <div class="glass-card step-card">
           <div class="card-header">
@@ -177,9 +200,46 @@
               <button type="button" id="btn-add-custom-mission" class="secondary-btn">추가</button>
             </div>
           </div>
+        <!-- 3단계: 마니또 실패 벌칙 설정 -->
+        <div class="glass-card step-card">
+          <div class="card-header">
+            <div class="step-num">3</div>
+            <div>
+              <div class="title-with-badge">
+                <h2 class="card-title">마니또 실패 벌칙 설정 (선택)</h2>
+                <span class="badge-accent">릴레이 공개식 연동</span>
+              </div>
+              <p class="card-subtitle">릴레이 공개식 세레머니에서 미션을 달성하지 못한 참가자가 수행할 벌칙을 관리합니다.</p>
+            </div>
+          </div>
+
+          <div class="mission-toolbar">
+            <div class="mission-select-status">
+              선택된 벌칙: <strong id="selected-penalty-count">12</strong>개
+            </div>
+            <div class="mission-btn-group">
+              <button type="button" id="btn-select-all-penalties" class="text-btn">전체 선택</button>
+              <button type="button" id="btn-deselect-all-penalties" class="text-btn">전체 해제</button>
+              <button type="button" id="btn-reset-penalties" class="text-btn" title="기본 벌칙 12종 복원">기본값 복원</button>
+            </div>
+          </div>
+
+          <!-- 벌칙 체크리스트 그리드 -->
+          <div class="penalty-list-grid" id="penalty-items-container">
+            <!-- penalties.js 기반 동적 렌더링 -->
+          </div>
+
+          <!-- 직접 나만의 벌칙 추가하기 -->
+          <div class="custom-mission-box">
+            <label for="input-custom-penalty" class="form-label">⚡ 나만의 커스텀 벌칙 추가</label>
+            <div class="custom-input-group">
+              <input type="text" id="input-custom-penalty" class="form-input" placeholder="새로운 벌칙을 직접 입력하세요 (예: 팀원 전원에게 아이스크림 쏘기)">
+              <button type="button" id="btn-add-custom-penalty" class="secondary-btn">추가</button>
+            </div>
+          </div>
         </div>
 
-        <!-- 3단계: 매칭 생성 CTA -->
+        <!-- 4단계: 매칭 생성 CTA -->
         <div class="cta-wrapper">
           <div class="guarantee-badge">
             🔒 <span>수학적으로 본인이 본인을 뽑지 않는 완전 순열 & 100% 개인 암호화 매칭을 보장합니다.</span>
@@ -223,6 +283,26 @@
           <button type="button" id="btn-open-ceremony-room" class="glow-cta-btn ceremony-launch-btn">
             <span>🚀 릴레이 공개식 시작하기</span>
           </button>
+        </div>
+
+        <!-- ☁️ 실시간 팀원 확인 현황 카드 -->
+        <div class="glass-card live-status-card" id="live-status-card">
+          <div class="live-status-header">
+            <div class="live-badge-row">
+              <span class="live-pulse-badge" id="live-pulse-badge">🔴 LIVE</span>
+              <h3 class="live-status-title">팀원 실시간 확인 현황</h3>
+            </div>
+            <span class="live-progress-ratio" id="live-progress-ratio">0 / 0명 확인</span>
+          </div>
+          <div class="live-progress-track">
+            <div class="live-progress-bar" id="live-progress-bar" style="width: 0%;"></div>
+          </div>
+          <div class="live-members-chips" id="live-members-chips">
+            <!-- JS 동적 렌더링: [김승완 ✅] [허권찬 🔒] ... -->
+          </div>
+          <div class="live-card-footer" id="live-card-footer">
+            <span id="live-db-hint">☁️ 클라우드 DB와 실시간 동기화 중입니다.</span>
+          </div>
         </div>
 
         <!-- 공유 방식 선택 탭 -->
@@ -387,6 +467,31 @@
                 <span>← 공유 대시보드로 돌아가기</span>
               </button>
             </div>
+
+            <!-- ⚡ 릴레이 공개식 벌칙 목록 확인 및 관리 패널 -->
+            <div class="lobby-penalty-manage-box">
+              <div class="lobby-penalty-header" id="btn-toggle-lobby-penalties">
+                <div class="lobby-penalty-info">
+                  <span class="lobby-penalty-icon">⚡</span>
+                  <div>
+                    <strong>미션 실패 시 벌칙 목록</strong>
+                    <span class="lobby-penalty-badge" id="c-lobby-penalty-count">12개 활성화됨</span>
+                  </div>
+                </div>
+                <button type="button" class="text-btn mini" id="btn-open-penalty-manager">
+                  <span id="btn-lobby-penalty-label">벌칙 목록 점검 & 추가 ⚙️</span>
+                </button>
+              </div>
+              <div class="lobby-penalty-drawer hidden" id="lobby-penalty-drawer">
+                <div class="lobby-penalty-quick-add">
+                  <input type="text" id="input-lobby-penalty" class="form-input mini" placeholder="새 벌칙 즉석 추가 (예: 깜짝 댄스 15초)">
+                  <button type="button" id="btn-add-lobby-penalty" class="secondary-btn mini">추가</button>
+                </div>
+                <div class="lobby-penalty-chips" id="lobby-penalty-chips">
+                  <!-- JS 동적 렌더링 -->
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -493,9 +598,49 @@
                     </div>
                   </div>
 
+                  <!-- 🚨 실패 시 랜덤 벌칙 룰렛 추첨 박스 -->
+                  <div class="c-penalty-roulette-box hidden" id="c-penalty-roulette-box">
+                    <div class="c-penalty-header">
+                      <span class="c-penalty-pill">🚨 MISSION BUSTED!</span>
+                      <h4 class="c-penalty-title">미션 실패! 운명의 벌칙 룰렛</h4>
+                      <p class="c-penalty-subtitle">
+                        선물을 준 <strong><span id="c-penalty-giver-name">김철수</span></strong> 님이 수행할 랜덤 벌칙을 뽑아주세요!
+                      </p>
+                    </div>
+
+                    <!-- 슬롯머신 롤링 디스플레이 창 -->
+                    <div class="roulette-slot-window" id="roulette-slot-window">
+                      <div class="slot-item" id="roulette-display-item">
+                        <span class="slot-icon" id="roulette-icon">🎲</span>
+                        <div class="slot-info">
+                          <span class="slot-text" id="roulette-text">벌칙 룰렛을 돌려주세요!</span>
+                          <span class="slot-tip" id="roulette-tip">등록된 벌칙 목록 중 1개가 무작위로 선정됩니다.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 룰렛 액션 버튼 -->
+                    <div class="roulette-actions">
+                      <button type="button" id="btn-spin-penalty-roulette" class="glow-cta-btn roulette-spin-btn">
+                        <span class="btn-sparkle">🎰</span>
+                        <span id="btn-spin-text">운명의 벌칙 룰렛 돌리기!</span>
+                      </button>
+                      <button type="button" id="btn-respin-penalty-roulette" class="ghost-btn hidden">
+                        <span>🔄 다시 뽑기 (기회 1회)</span>
+                      </button>
+                    </div>
+                  </div>
+
                   <!-- 판정 완료 후 날인 도장 & 다음 주자 바통 버튼 -->
                   <div class="c-stamp-result-box hidden" id="c-stamp-result-box">
                     <div class="stamp-mark" id="c-stamp-mark">SUCCESS</div>
+                    
+                    <!-- 당첨된 벌칙 인라인 알림 박스 (실패 시에만 표시) -->
+                    <div class="c-penalty-awarded-badge hidden" id="c-penalty-awarded-badge">
+                      <span class="penalty-tag-label">⚡ 수행할 벌칙:</span>
+                      <strong id="c-penalty-awarded-text">팀원들에게 커피 쏘기</strong>
+                    </div>
+
                     <div class="c-relay-next-action">
                       <p class="c-relay-next-guide">
                         선물을 받은 <strong><span id="c-next-giver-name">이영희</span></strong> 님이 이제 선물을 전할 차례입니다! 👉
@@ -548,6 +693,20 @@
               </div>
             </div>
 
+            <!-- 💥 오늘의 명예 벌칙 수행단 요약 카드 (실패자가 있을 경우 표시) -->
+            <div class="glass-card finale-penalty-summary hidden" id="finale-penalty-summary">
+              <div class="penalty-summary-header">
+                <span class="penalty-summary-icon">💥</span>
+                <div>
+                  <h3 class="penalty-summary-title">오늘의 명예 벌칙 수행단 (<span id="finale-penalty-count">0</span>명)</h3>
+                  <p class="penalty-summary-desc">아쉽게 미션을 놓친 팀원들의 벌칙 수행 약속! 캡처해서 팀 단톡방에 공유하세요 📸</p>
+                </div>
+              </div>
+              <div class="penalty-summary-list" id="finale-penalty-list">
+                <!-- JS 렌더링 -->
+              </div>
+            </div>
+
             <!-- 전원 릴레이 히스토리 테이블 -->
             <div class="finale-chain-history">
               <h3 class="card-title" style="margin-bottom: 14px;">📜 우리팀 릴레이 세레머니 히스토리</h3>
@@ -559,7 +718,7 @@
                       <th>화살표</th>
                       <th>선물 받은 사람</th>
                       <th>수행 미션</th>
-                      <th>최종 판정</th>
+                      <th>최종 판정 & 벌칙</th>
                     </tr>
                   </thead>
                   <tbody id="finale-history-tbody">
@@ -597,7 +756,13 @@
 
         <div class="glass-card room-selection-card">
           <div class="room-card-header">
-            <h2 class="card-title">누구신가요? 본인의 이름을 탭하세요</h2>
+            <div class="room-header-top-row">
+              <h2 class="card-title">누구신가요? 본인의 이름을 탭하세요</h2>
+              <div class="room-sync-pill" id="room-sync-pill">
+                <span class="sync-dot pulse" id="room-sync-dot"></span>
+                <span id="room-sync-text">실시간 동기화 활성</span>
+              </div>
+            </div>
             <p class="card-subtitle">본인 확인(비밀번호 입력) 후 마니또 대상과 비밀 미션이 공개됩니다.</p>
           </div>
 
@@ -849,6 +1014,61 @@
       </div>
       <div class="modal-footer">
         <button type="button" id="btn-confirm-guide" class="primary-mini-btn w-full">확인했습니다</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ☁️ 클라우드 DB 연동 설정 모달 -->
+  <div id="db-modal" class="modal-backdrop hidden">
+    <div class="modal-card db-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-icon">☁️</span>
+          <div>
+            <h2 class="modal-title">Firebase 클라우드 DB 연동</h2>
+            <p class="modal-subtitle">모든 팀원의 비밀번호 잠금과 확인 상태를 실시간으로 동기화합니다.</p>
+          </div>
+        </div>
+        <button type="button" id="btn-close-db-modal" class="modal-close-btn" aria-label="닫기">✕</button>
+      </div>
+      <div class="modal-body db-modal-body">
+        <div class="db-current-status-box" id="db-current-status-box">
+          <div class="db-status-row">
+            <span class="db-status-label">현재 연결 상태:</span>
+            <span class="db-status-badge" id="modal-db-status-badge">확인 중...</span>
+          </div>
+          <p class="helper-note" id="modal-db-status-desc">
+            Firebase 프로젝트를 연결하면 다른 팀원이 비밀번호를 등록했을 때 즉시 전 기기에서 잠깁니다.
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-top: 16px;">
+          <label for="input-firebase-config" class="form-label">
+            🔑 Firebase 프로젝트 설정 (firebaseConfig) 붙여넣기
+          </label>
+          <textarea id="input-firebase-config" class="form-textarea db-config-textarea" rows="7" placeholder="Firebase 콘솔에서 복사한 코드 스니펫이나 JSON을 여기에 붙여넣으세요.&#10;&#10;예시:&#10;const firebaseConfig = {&#10;  apiKey: &quot;AIzaSy...&quot;,&#10;  projectId: &quot;my-manito-app&quot;,&#10;  ...&#10;};"></textarea>
+        </div>
+
+        <div class="db-guide-collapse">
+          <details class="db-details">
+            <summary class="db-summary">📖 Firebase 무료 DB 생성 1분 가이드 보기</summary>
+            <ol class="db-step-list">
+              <li><a href="https://console.firebase.google.com/" target="_blank" rel="noopener">Firebase 콘솔</a>에 접속하여 <strong>[프로젝트 추가]</strong>를 누릅니다.</li>
+              <li>좌측 메뉴 <strong>[빌드] ➔ [Firestore Database]</strong>에서 <strong>[데이터베이스 만들기]</strong>를 클릭합니다. (위치: 서울 <code>asia-northeast3</code> 권장)</li>
+              <li>좌측 상단 톱니바퀴 <strong>[프로젝트 설정]</strong> ➔ [내 앱]에서 <strong>[웹(&lt;/&gt;)]</strong> 아이콘을 눌러 앱을 등록합니다.</li>
+              <li>화면에 나타난 <strong><code>const firebaseConfig = { ... };</code></strong> 코드를 복사하여 위의 입력창에 붙여넣고 [연동 테스트 및 저장]을 누르면 완료!</li>
+            </ol>
+          </details>
+        </div>
+      </div>
+      <div class="modal-footer db-modal-footer">
+        <button type="button" id="btn-disconnect-db" class="ghost-btn danger">연동 해제 (로컬 모드)</button>
+        <div class="footer-right-btns">
+          <button type="button" id="btn-cancel-db-modal" class="secondary-btn">취소</button>
+          <button type="button" id="btn-save-db-config" class="glow-cta-btn">
+            <span>🧪 연동 테스트 및 저장</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

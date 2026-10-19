@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: rooms
+// Document ID: pattern "room_{hash1}_{hash2}_{length}" (max 64 chars)
+// Fields:
+//   - title: string (required, 1..100 chars)
+//   - deadline: string (optional, max 100 chars)
+//   - createdAt: timestamp (server-assigned)
+//   - updatedAt: timestamp (server-assigned)
+//   - members: map (required, keys are participant names)
+//     - [memberName]: map (optional/required)
+//       - isClaimed: bool (required)
+//       - pinHash: string (optional, max 64 chars)
+//       - claimedAt: string (optional, ISO timestamp)
+//       - isViewed: bool (optional)
+//       - viewedAt: string (optional, ISO timestamp)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidRoomDoc(data) {
+      return data.keys().hasAll(['title', 'members'])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 100
+        && data.members is map
+        && (!('deadline' in data) || (data.deadline is string && data.deadline.size() <= 100));
+    }
+
+    // Rules for rooms collection (Public party game with token-based access)
+    match /rooms/{roomId} {
+      // Room read: Anyone who has the room link can view the room state
+      allow read: if true;
+
+      // Room create: Anyone can create a room document initialized from a bundle
+      allow create: if isValidRoomDoc(request.resource.data);
+
+      // Room update: Updates are allowed to register PIN or update view status
+      allow update: if isValidRoomDoc(request.resource.data);
+
+      // Deletion is prohibited for data integrity
+      allow delete: if false;
+    }
+
+    // Connection ping test document
+    match /_connection_test/{testId} {
+      allow read, write: if true;
+    }
+
+    // Default deny for any other collection
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -5,6 +5,7 @@
  */
 
 import { MissionManager, MISSION_CATEGORIES } from './missions.js';
+import { PenaltyManager } from './penalties.js';
 import { 
   encodeToken, 
   decodeToken, 
@@ -16,6 +17,18 @@ import {
   setLocalMemberPinHash,
   verifyMemberPin
 } from './crypto.js';
+import { 
+  initDatabase, 
+  isDbConnected, 
+  getDbInfo, 
+  disconnectDb, 
+  subscribeRoom, 
+  claimMemberPin, 
+  verifyMemberPinWithDb, 
+  markMemberViewed, 
+  testFirebaseConnection 
+} from './db.js';
+import { parseFirebaseConfigInput, setStoredFirebaseConfig } from './firebase-config.js';
 import { createManitoMatch, parseParticipantsInput, buildRelayChain } from './matcher.js';
 import { sound } from './sound.js';
 import { ConfettiExplosion } from './confetti.js';
@@ -25,6 +38,7 @@ import { exportResultCard } from './card-export.js';
 class ManitoApp {
   constructor() {
     this.missionManager = new MissionManager();
+    this.penaltyManager = new PenaltyManager();
     this.activeCategory = 'all';
     this.activeRoom = null;
     this.activeRevealData = null;
@@ -32,6 +46,11 @@ class ManitoApp {
     this.scratchCard = null;
     this.activeRevealMode = 'scratch';
     this.sentStatus = JSON.parse(localStorage.getItem('manito_sent_status') || '{}');
+
+    // 실시간 클라우드 DB 연동 상태
+    this.roomUnsubscribe = null;
+    this.shareUnsubscribe = null;
+    this.liveRoomData = null;
 
     // PIN 보안 관련 상태 (영지식 셀프 등록 지원)
     this.pendingToken = null;
@@ -48,6 +67,11 @@ class ManitoApp {
     this.ceremonyIndex = 0;
     this.ceremonyJudgments = [];
     this.selectedStarter = '';
+
+    // 벌칙 룰렛 상태
+    this.currentDrawnPenalty = null;
+    this.isRouletteRolling = false;
+    this.hasRespun = false;
 
     this.init();
   }
@@ -68,9 +92,12 @@ class ManitoApp {
       }
     }
 
+    this.initDbStatus();
     this.setupEventListeners();
     this.renderCategoryTabs();
     this.renderMissionList();
+    this.renderPenaltyList();
+    this.updatePenaltyCountBadge();
     this.initBaseUrlInput();
     this.updateSoundIcon();
 
@@ -85,6 +112,16 @@ class ManitoApp {
   handleRouting() {
     const hash = window.location.hash || '';
     const search = window.location.search || '';
+
+    // 이전 실시간 구독 정리
+    if (!hash.startsWith('#/room') && !search.includes('r=') && this.roomUnsubscribe) {
+      this.roomUnsubscribe();
+      this.roomUnsubscribe = null;
+    }
+    if (!hash.startsWith('#/share') && this.shareUnsubscribe) {
+      this.shareUnsubscribe();
+      this.shareUnsubscribe = null;
+    }
 
     // 1. 마니또 릴레이 공개식 세레머니 (#/ceremony)
     if (hash.startsWith('#/ceremony')) {
@@ -203,6 +240,41 @@ class ManitoApp {
       });
     }
 
+    // 클라우드 DB 연동 모달
+    const btnDbStatus = document.getElementById('btn-db-status');
+    const dbModal = document.getElementById('db-modal');
+    const btnCloseDb = document.getElementById('btn-close-db-modal');
+    const btnCancelDb = document.getElementById('btn-cancel-db-modal');
+    const btnSaveDb = document.getElementById('btn-save-db-config');
+    const btnDisconnectDb = document.getElementById('btn-disconnect-db');
+
+    if (btnDbStatus && dbModal) {
+      btnDbStatus.addEventListener('click', () => {
+        sound.playPop();
+        this.openDbModal();
+      });
+    }
+
+    const btnOpenDbSetup = document.getElementById('btn-open-db-from-setup');
+    if (btnOpenDbSetup) {
+      btnOpenDbSetup.addEventListener('click', () => {
+        sound.playPop();
+        this.openDbModal();
+      });
+    }
+    if (btnCloseDb && dbModal) {
+      btnCloseDb.addEventListener('click', () => dbModal.classList.add('hidden'));
+    }
+    if (btnCancelDb && dbModal) {
+      btnCancelDb.addEventListener('click', () => dbModal.classList.add('hidden'));
+    }
+    if (btnSaveDb) {
+      btnSaveDb.addEventListener('click', () => this.handleSaveDbConfig());
+    }
+    if (btnDisconnectDb) {
+      btnDisconnectDb.addEventListener('click', () => this.handleDisconnectDb());
+    }
+
     // 새 마니또 만들기 버튼 (헤더)
     const btnNavNew = document.getElementById('btn-nav-new');
     if (btnNavNew) {
@@ -290,6 +362,73 @@ class ManitoApp {
       btnAddCustom.addEventListener('click', handleAdd);
       inputCustom.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleAdd();
+      });
+    }
+
+    // =======================================================================
+    // ⚡ 실패 벌칙 설정 이벤트 바인딩 (view-setup)
+    // =======================================================================
+    const btnSelectAllPenalties = document.getElementById('btn-select-all-penalties');
+    const btnDeselectAllPenalties = document.getElementById('btn-deselect-all-penalties');
+    const btnResetPenalties = document.getElementById('btn-reset-penalties');
+    const btnAddCustomPenalty = document.getElementById('btn-add-custom-penalty');
+    const inputCustomPenalty = document.getElementById('input-custom-penalty');
+
+    if (btnSelectAllPenalties) {
+      btnSelectAllPenalties.addEventListener('click', () => {
+        sound.playPop();
+        this.penaltyManager.selectAll();
+        this.renderPenaltyList();
+        this.updatePenaltyCountBadge();
+        this.showToast('⚡ 모든 벌칙이 선택되었습니다.');
+      });
+    }
+
+    if (btnDeselectAllPenalties) {
+      btnDeselectAllPenalties.addEventListener('click', () => {
+        sound.playPop();
+        this.penaltyManager.deselectAll();
+        this.renderPenaltyList();
+        this.updatePenaltyCountBadge();
+        this.showToast('⚡ 모든 벌칙 선택이 해제되었습니다.');
+      });
+    }
+
+    if (btnResetPenalties) {
+      btnResetPenalties.addEventListener('click', () => {
+        sound.playPop();
+        if (confirm('벌칙 목록을 기본 12종 프리셋으로 초기화하시겠습니까?')) {
+          this.penaltyManager.resetToDefault();
+          this.renderPenaltyList();
+          this.updatePenaltyCountBadge();
+          this.showToast('✨ 기본 벌칙 12종으로 복원되었습니다.');
+        }
+      });
+    }
+
+    if (btnAddCustomPenalty && inputCustomPenalty) {
+      const handleAddPenalty = () => {
+        const text = inputCustomPenalty.value.trim();
+        if (!text) {
+          alert('벌칙 내용을 입력해주세요!');
+          return;
+        }
+        sound.playPop();
+        const created = this.penaltyManager.addCustom(text);
+        if (created) {
+          inputCustomPenalty.value = '';
+          this.renderPenaltyList();
+          this.updatePenaltyCountBadge();
+          this.showToast('⚡ 나만의 벌칙이 추가되었습니다!');
+        }
+      };
+
+      btnAddCustomPenalty.addEventListener('click', handleAddPenalty);
+      inputCustomPenalty.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleAddPenalty();
+        }
       });
     }
 
@@ -500,6 +639,72 @@ class ManitoApp {
     if (btnJudgeEffort) btnJudgeEffort.addEventListener('click', () => this.judgeCeremonyMission('effort'));
     if (btnJudgeFail) btnJudgeFail.addEventListener('click', () => this.judgeCeremonyMission('fail'));
 
+    // 🎲 벌칙 룰렛 돌리기 & 다시 뽑기 버튼
+    const btnSpinPenalty = document.getElementById('btn-spin-penalty-roulette');
+    if (btnSpinPenalty) {
+      btnSpinPenalty.addEventListener('click', () => this.spinPenaltyRoulette(false));
+    }
+
+    const btnRespinPenalty = document.getElementById('btn-respin-penalty-roulette');
+    if (btnRespinPenalty) {
+      btnRespinPenalty.addEventListener('click', () => this.spinPenaltyRoulette(true));
+    }
+
+    // ⚡ 로비 벌칙 관리 드로어 토글 & 즉석 추가
+    const btnToggleLobbyPenalties = document.getElementById('btn-toggle-lobby-penalties');
+    const btnOpenPenaltyManager = document.getElementById('btn-open-penalty-manager');
+    const lobbyDrawer = document.getElementById('lobby-penalty-drawer');
+
+    const toggleLobbyDrawer = () => {
+      if (!lobbyDrawer) return;
+      sound.playPop();
+      const isHidden = lobbyDrawer.classList.toggle('hidden');
+      const label = document.getElementById('btn-lobby-penalty-label');
+      if (label) {
+        label.textContent = isHidden ? '벌칙 목록 점검 & 추가 ⚙️' : '닫기 ✕';
+      }
+      if (!isHidden) {
+        this.renderLobbyPenalties();
+      }
+    };
+
+    if (btnToggleLobbyPenalties) btnToggleLobbyPenalties.addEventListener('click', toggleLobbyDrawer);
+    if (btnOpenPenaltyManager) {
+      btnOpenPenaltyManager.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleLobbyDrawer();
+      });
+    }
+
+    const btnAddLobbyPenalty = document.getElementById('btn-add-lobby-penalty');
+    const inputLobbyPenalty = document.getElementById('input-lobby-penalty');
+    if (btnAddLobbyPenalty && inputLobbyPenalty) {
+      const handleAddLobby = () => {
+        const text = inputLobbyPenalty.value.trim();
+        if (!text) {
+          alert('벌칙 내용을 입력해주세요!');
+          return;
+        }
+        sound.playPop();
+        const created = this.penaltyManager.addCustom(text);
+        if (created) {
+          inputLobbyPenalty.value = '';
+          this.renderPenaltyList();
+          this.updatePenaltyCountBadge();
+          this.renderLobbyPenalties();
+          this.showToast('⚡ 새로운 벌칙이 추가되었습니다!');
+        }
+      };
+
+      btnAddLobbyPenalty.addEventListener('click', handleAddLobby);
+      inputLobbyPenalty.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleAddLobby();
+        }
+      });
+    }
+
     const btnCNextStep = document.getElementById('btn-c-next-step');
     if (btnCNextStep) {
       btnCNextStep.addEventListener('click', () => this.advanceCeremonyStep());
@@ -537,6 +742,158 @@ class ManitoApp {
     if (icon) {
       icon.textContent = sound.isMuted ? '🔇' : '🔊';
     }
+  }
+
+  // =========================================================================
+  // 클라우드 DB 연동 & 모달 관리 로직
+  // =========================================================================
+  initDbStatus() {
+    const res = initDatabase();
+    this.updateDbStatusUi();
+    if (res.isReady) {
+      console.log('Firebase Firestore connected successfully:', res.projectId);
+    }
+  }
+
+  updateDbStatusUi() {
+    const info = getDbInfo();
+    const btn = document.getElementById('btn-db-status');
+    const label = document.getElementById('db-status-text');
+    const dot = document.getElementById('db-dot');
+    const setupPill = document.getElementById('setup-db-status-pill');
+
+    if (btn && label) {
+      if (info.isConnected) {
+        btn.classList.add('connected');
+        label.textContent = `☁️ ${info.projectId}`;
+        btn.title = `클라우드 DB 연결됨 (${info.projectId}) - 클릭하여 설정 변경`;
+      } else {
+        btn.classList.remove('connected');
+        label.textContent = '☁️ 클라우드 DB';
+        btn.title = '클라우드 DB 연동 설정 (현재 로컬 모드)';
+      }
+    }
+
+    if (dot) {
+      dot.className = info.isConnected ? 'db-dot connected' : 'db-dot';
+    }
+
+    if (setupPill) {
+      if (info.isConnected) {
+        setupPill.className = 'db-status-pill connected';
+        setupPill.textContent = `🟢 ${info.projectId} 연결됨`;
+      } else {
+        setupPill.className = 'db-status-pill';
+        setupPill.textContent = '💾 로컬 모드 동작 중';
+      }
+    }
+
+    const modalBadge = document.getElementById('modal-db-status-badge');
+    const modalDesc = document.getElementById('modal-db-status-desc');
+    if (modalBadge) {
+      if (info.isConnected) {
+        modalBadge.className = 'db-status-badge connected';
+        modalBadge.textContent = `🟢 연결됨 (${info.projectId})`;
+        if (modalDesc) {
+          modalDesc.innerHTML = `현재 <strong>${info.projectId}</strong> Firebase 프로젝트에 실시간 연결되어 있습니다.<br>팀원들이 등록한 비밀번호와 확인 상태가 모든 기기에서 즉시 동기화됩니다.`;
+        }
+      } else {
+        modalBadge.className = 'db-status-badge';
+        modalBadge.textContent = '⚪ 로컬 모드 (미연결)';
+        if (modalDesc) {
+          modalDesc.innerHTML = `현재 클라우드 DB가 연결되지 않아 각자의 기기(로컬 브라우저)에서만 잠금이 관리됩니다.<br>아래에 Firebase 설정을 붙여넣으면 즉시 전 기기 실시간 동기화가 활성화됩니다.`;
+        }
+      }
+    }
+  }
+
+  openDbModal() {
+    const modal = document.getElementById('db-modal');
+    const textarea = document.getElementById('input-firebase-config');
+    if (modal) {
+      this.updateDbStatusUi();
+      if (textarea) {
+        const stored = localStorage.getItem('manito_firebase_config_v1');
+        if (stored) {
+          try {
+            textarea.value = JSON.stringify(JSON.parse(stored), null, 2);
+          } catch (e) {
+            textarea.value = stored;
+          }
+        } else {
+          textarea.value = '';
+        }
+      }
+      modal.classList.remove('hidden');
+    }
+  }
+
+  async handleSaveDbConfig() {
+    const textarea = document.getElementById('input-firebase-config');
+    const modal = document.getElementById('db-modal');
+    const btnSave = document.getElementById('btn-save-db-config');
+    if (!textarea) return;
+
+    const raw = textarea.value.trim();
+    if (!raw) {
+      alert('Firebase 설정(firebaseConfig)을 입력해주세요.');
+      return;
+    }
+
+    const parsed = parseFirebaseConfigInput(raw);
+    if (!parsed || !parsed.apiKey || !parsed.projectId) {
+      alert('유효한 Firebase 설정을 찾을 수 없습니다.\napiKey와 projectId가 포함된 코드나 JSON을 붙여넣어 주세요.');
+      return;
+    }
+
+    if (btnSave) {
+      btnSave.disabled = true;
+      btnSave.innerHTML = '<span>⏳ 연동 테스트 중...</span>';
+    }
+
+    try {
+      this.showToast('🧪 Firebase 연결 테스트를 진행 중입니다...');
+      const testRes = await testFirebaseConnection(parsed);
+
+      if (!testRes.success) {
+        sound.playPop();
+        alert(`❌ Firebase 연결 실패:\n${testRes.error}\n\n입력한 설정 및 Firestore 데이터베이스가 생성되었는지 확인해주세요.`);
+        return;
+      }
+
+      setStoredFirebaseConfig(parsed);
+      initDatabase(parsed);
+
+      sound.playFanfare();
+      if (this.confetti) this.confetti.fire(100);
+
+      this.updateDbStatusUi();
+      if (modal) modal.classList.add('hidden');
+      this.showToast(`🎉 Firebase 클라우드 DB [${parsed.projectId}] 연결 완료! 실시간 동기화가 활성화되었습니다.`);
+
+      this.handleRouting();
+    } catch (err) {
+      sound.playPop();
+      alert(`연동 오류: ${err.message}`);
+    } finally {
+      if (btnSave) {
+        btnSave.disabled = false;
+        btnSave.innerHTML = '<span>🧪 연동 테스트 및 저장</span>';
+      }
+    }
+  }
+
+  handleDisconnectDb() {
+    if (!confirm('Firebase 클라우드 DB 연동을 해제하고 로컬 모드로 전환하시겠습니까?')) {
+      return;
+    }
+    sound.playPop();
+    disconnectDb();
+    this.updateDbStatusUi();
+    const modal = document.getElementById('db-modal');
+    if (modal) modal.classList.add('hidden');
+    this.showToast('💾 클라우드 DB 연동이 해제되어 로컬 모드로 전환되었습니다.');
+    this.handleRouting();
   }
 
   // =========================================================================
@@ -626,6 +983,121 @@ class ManitoApp {
         pinBadge.classList.add('hidden');
       }
     }
+  }
+
+  // =========================================================================
+  // ⚡ 벌칙(Penalty) 목록 렌더링 및 관리 로직
+  // =========================================================================
+  renderPenaltyList() {
+    const container = document.getElementById('penalty-items-container');
+    if (!container) return;
+
+    const penalties = this.penaltyManager.getAll();
+    this.updatePenaltyCountBadge();
+
+    container.innerHTML = penalties.map(p => {
+      const isSelected = this.penaltyManager.selectedIds.has(p.id);
+      return `
+        <div class="penalty-item ${isSelected ? 'selected' : ''}" data-id="${p.id}">
+          <div class="penalty-checkbox-wrap">
+            <input type="checkbox" class="penalty-checkbox" ${isSelected ? 'checked' : ''} data-id="${p.id}">
+          </div>
+          <div class="penalty-content">
+            <div class="penalty-header-line">
+              <span class="penalty-icon">${p.icon || '⚡'}</span>
+              <span class="penalty-text">${p.text}</span>
+            </div>
+            ${p.tip ? `<div class="penalty-tip">${p.tip}</div>` : ''}
+          </div>
+          <button type="button" class="penalty-delete-btn" data-id="${p.id}" title="벌칙 삭제" aria-label="벌칙 삭제">
+            🗑️
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    // 체크박스 및 카드 클릭 토글
+    container.querySelectorAll('.penalty-item').forEach(card => {
+      const id = card.dataset.id;
+      const checkbox = card.querySelector('.penalty-checkbox');
+      const deleteBtn = card.querySelector('.penalty-delete-btn');
+
+      card.addEventListener('click', (e) => {
+        if (e.target === deleteBtn || e.target.closest('.penalty-delete-btn')) {
+          return;
+        }
+        if (e.target !== checkbox) {
+          checkbox.checked = !checkbox.checked;
+        }
+        sound.playPop();
+        this.penaltyManager.toggle(id);
+        card.classList.toggle('selected', checkbox.checked);
+        this.updatePenaltyCountBadge();
+      });
+
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sound.playPop();
+          if (confirm('이 벌칙을 목록에서 삭제하시겠습니까?')) {
+            this.penaltyManager.remove(id);
+            this.renderPenaltyList();
+            this.updatePenaltyCountBadge();
+            this.showToast('🗑️ 벌칙이 삭제되었습니다.');
+          }
+        });
+      }
+    });
+  }
+
+  updatePenaltyCountBadge() {
+    const selectedCount = this.penaltyManager.getSelected().length;
+    const badge = document.getElementById('selected-penalty-count');
+    if (badge) badge.textContent = selectedCount;
+
+    const lobbyBadge = document.getElementById('c-lobby-penalty-count');
+    if (lobbyBadge) lobbyBadge.textContent = `${selectedCount}개 활성화됨`;
+  }
+
+  renderLobbyPenalties() {
+    const container = document.getElementById('lobby-penalty-chips');
+    if (!container) return;
+
+    const all = this.penaltyManager.getAll();
+    container.innerHTML = all.map(p => {
+      const isSelected = this.penaltyManager.selectedIds.has(p.id);
+      return `
+        <span class="lobby-penalty-chip ${isSelected ? '' : 'disabled'}" data-id="${p.id}">
+          <span>${p.icon || '⚡'}</span>
+          <span>${p.text}</span>
+          <span class="lobby-penalty-chip-del" data-id="${p.id}" title="삭제">✕</span>
+        </span>
+      `;
+    }).join('');
+
+    container.querySelectorAll('.lobby-penalty-chip').forEach(chip => {
+      const id = chip.dataset.id;
+      const delBtn = chip.querySelector('.lobby-penalty-chip-del');
+
+      chip.addEventListener('click', (e) => {
+        if (e.target === delBtn) return;
+        sound.playPop();
+        this.penaltyManager.toggle(id);
+        chip.classList.toggle('disabled', !this.penaltyManager.selectedIds.has(id));
+        this.updatePenaltyCountBadge();
+      });
+
+      if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sound.playPop();
+          this.penaltyManager.remove(id);
+          this.renderPenaltyList();
+          this.updatePenaltyCountBadge();
+          this.renderLobbyPenalties();
+        });
+      }
+    });
   }
 
   initBaseUrlInput() {
@@ -796,6 +1268,25 @@ class ManitoApp {
       `;
     }
 
+    // 실시간 DB 팀원 확인 현황 구독 (대시보드)
+    if (this.shareUnsubscribe) {
+      this.shareUnsubscribe();
+      this.shareUnsubscribe = null;
+    }
+
+    if (this.activeRoom.roomToken) {
+      const inspected = {
+        roomTitle: this.activeRoom.roomTitle,
+        deadline: this.activeRoom.deadline,
+        members: this.activeRoom.matches.map(m => ({ name: m.giver, hasPin: m.hasPin }))
+      };
+      this.updateLiveShareStatus(null);
+
+      this.shareUnsubscribe = subscribeRoom(this.activeRoom.roomToken, inspected, (liveData) => {
+        this.updateLiveShareStatus(liveData);
+      }, (err) => console.warn('Share live status error:', err));
+    }
+
     // 단체방 공용 링크 UI 채우기
     const roomDisplay = document.getElementById('room-link-display');
     if (roomDisplay && this.activeRoom.roomLink) {
@@ -922,6 +1413,63 @@ class ManitoApp {
     `).join('');
   }
 
+  updateLiveShareStatus(liveData) {
+    if (!this.activeRoom || !this.activeRoom.matches) return;
+
+    const total = this.activeRoom.matches.length;
+    let viewedCount = 0;
+    let claimedCount = 0;
+
+    const chipsHtml = this.activeRoom.matches.map(m => {
+      const name = m.giver;
+      const mem = liveData?.members?.[name];
+      const isViewed = !!mem?.isViewed;
+      const isClaimed = !!mem?.isClaimed || m.hasPin || !!getLocalMemberPinHash(this.activeRoom.roomToken, name);
+
+      if (isViewed) viewedCount++;
+      if (isClaimed) claimedCount++;
+
+      let chipClass = 'pending';
+      let icon = '⏳';
+      let statusText = '미확인';
+
+      if (isViewed) {
+        chipClass = 'viewed';
+        icon = '✅';
+        statusText = '확인 완료';
+      } else if (isClaimed) {
+        chipClass = 'claimed';
+        icon = '🔒';
+        statusText = '비번 잠김';
+      }
+
+      return `
+        <span class="live-member-chip ${chipClass}">
+          <span>${icon}</span>
+          <strong>${name}</strong>
+          <span style="font-size: 0.72rem; opacity: 0.85;">(${statusText})</span>
+        </span>
+      `;
+    }).join('');
+
+    const ratioEl = document.getElementById('live-progress-ratio');
+    const barEl = document.getElementById('live-progress-bar');
+    const chipsContainer = document.getElementById('live-members-chips');
+    const dbHint = document.getElementById('live-db-hint');
+
+    if (ratioEl) ratioEl.textContent = `${viewedCount} / ${total}명 확인 (${claimedCount}명 비번 등록)`;
+    if (barEl) {
+      const pct = total > 0 ? Math.round((viewedCount / total) * 100) : 0;
+      barEl.style.width = `${pct}%`;
+    }
+    if (chipsContainer) chipsContainer.innerHTML = chipsHtml;
+    if (dbHint) {
+      dbHint.textContent = isDbConnected()
+        ? '☁️ Firebase 클라우드 DB와 실시간 동기화 중입니다.'
+        : '💾 로컬 모드 동작 중 (우측 상단 ☁️ DB 설정을 통해 실시간 클라우드 동기화를 켤 수 있습니다)';
+    }
+  }
+
   filterMemberCards(query) {
     const q = query.trim().toLowerCase();
     document.querySelectorAll('.member-link-card').forEach(card => {
@@ -981,6 +1529,8 @@ class ManitoApp {
     if (stage) stage.classList.add('hidden');
     if (finale) finale.classList.add('hidden');
 
+    this.renderLobbyPenalties();
+
     if (!this.activeRoom || !this.activeRoom.matches) return;
 
     // 첫 주자 선택 버튼 그리드 렌더링
@@ -1031,6 +1581,29 @@ class ManitoApp {
     const total = this.ceremonyChain.length;
     const currentMatch = this.ceremonyChain[this.ceremonyIndex];
     if (!currentMatch) return;
+
+    // 룰렛 상태 및 UI 초기화
+    this.currentDrawnPenalty = null;
+    this.isRouletteRolling = false;
+    this.hasRespun = false;
+
+    const rouletteBox = document.getElementById('c-penalty-roulette-box');
+    const rouletteSlot = document.getElementById('roulette-slot-window');
+    const rouletteIcon = document.getElementById('roulette-icon');
+    const rouletteText = document.getElementById('roulette-text');
+    const rouletteTip = document.getElementById('roulette-tip');
+    const btnSpinText = document.getElementById('btn-spin-text');
+    const btnRespin = document.getElementById('btn-respin-penalty-roulette');
+    const awardedBadge = document.getElementById('c-penalty-awarded-badge');
+
+    if (rouletteBox) rouletteBox.classList.add('hidden');
+    if (rouletteSlot) rouletteSlot.className = 'roulette-slot-window';
+    if (rouletteIcon) rouletteIcon.textContent = '🎲';
+    if (rouletteText) rouletteText.textContent = '벌칙 룰렛을 돌려주세요!';
+    if (rouletteTip) rouletteTip.textContent = '등록된 벌칙 목록 중 1개가 무작위로 선정됩니다.';
+    if (btnSpinText) btnSpinText.textContent = '운명의 벌칙 룰렛 돌리기!';
+    if (btnRespin) btnRespin.classList.add('hidden');
+    if (awardedBadge) awardedBadge.classList.add('hidden');
 
     // 프로그레스 바 & 카운터 갱신
     const currentIdxEl = document.getElementById('ceremony-current-idx');
@@ -1130,12 +1703,37 @@ class ManitoApp {
 
     sound.playStamp();
 
-    // 결과 기록
+    // 1. 실패(BUSTED)인 경우 -> 운명의 벌칙 룰렛 모드로 전환
+    if (resultType === 'fail') {
+      const giverNameEl = document.getElementById('c-penalty-giver-name');
+      if (giverNameEl) giverNameEl.textContent = currentMatch.giver;
+
+      const judgmentSection = document.getElementById('c-judgment-section');
+      const rouletteBox = document.getElementById('c-penalty-roulette-box');
+      const stampResultBox = document.getElementById('c-stamp-result-box');
+
+      if (judgmentSection) judgmentSection.classList.add('hidden');
+      if (rouletteBox) rouletteBox.classList.remove('hidden');
+      if (stampResultBox) stampResultBox.classList.add('hidden');
+
+      // 결과 초안 저장
+      this.ceremonyJudgments[this.ceremonyIndex] = {
+        giver: currentMatch.giver,
+        receiver: currentMatch.receiver,
+        missionText: currentMatch.missionText,
+        result: 'fail',
+        penalty: null
+      };
+      return;
+    }
+
+    // 2. 성공 또는 노력 인정인 경우 -> 바로 도장 찍고 다음 바통 준비
     this.ceremonyJudgments[this.ceremonyIndex] = {
       giver: currentMatch.giver,
       receiver: currentMatch.receiver,
       missionText: currentMatch.missionText,
-      result: resultType
+      result: resultType,
+      penalty: null
     };
 
     // 도장 스탬프 마크 UI 업데이트
@@ -1145,14 +1743,119 @@ class ManitoApp {
       if (resultType === 'success') {
         stampMark.textContent = '💮 SUCCESS';
         if (this.confetti) this.confetti.fire(120);
-      } else if (resultType === 'effort') {
-        stampMark.textContent = '🤔 EFFORT';
       } else {
-        stampMark.textContent = '😂 BUSTED';
+        stampMark.textContent = '🤔 EFFORT';
       }
     }
 
-    // 다음 바통 주자 안내 (마지막 사람인지 확인)
+    const awardedBadge = document.getElementById('c-penalty-awarded-badge');
+    if (awardedBadge) awardedBadge.classList.add('hidden');
+
+    this.updateNextGiverActionUi(currentMatch);
+
+    // 판정 섹션 전환
+    const judgmentSection = document.getElementById('c-judgment-section');
+    const stampResultBox = document.getElementById('c-stamp-result-box');
+    if (judgmentSection) judgmentSection.classList.add('hidden');
+    if (stampResultBox) stampResultBox.classList.remove('hidden');
+  }
+
+  spinPenaltyRoulette(isRespin = false) {
+    if (this.isRouletteRolling) return;
+    this.isRouletteRolling = true;
+
+    sound.playPop();
+
+    const currentMatch = this.ceremonyChain[this.ceremonyIndex];
+    const rouletteSlot = document.getElementById('roulette-slot-window');
+    const rouletteIcon = document.getElementById('roulette-icon');
+    const rouletteText = document.getElementById('roulette-text');
+    const rouletteTip = document.getElementById('roulette-tip');
+    const btnSpinText = document.getElementById('btn-spin-text');
+    const btnRespin = document.getElementById('btn-respin-penalty-roulette');
+
+    if (rouletteSlot) {
+      rouletteSlot.className = 'roulette-slot-window rolling';
+    }
+    if (btnSpinText) btnSpinText.textContent = '🎰 운명의 벌칙 추첨 중...';
+    if (btnRespin) btnRespin.classList.add('hidden');
+
+    const pool = this.penaltyManager.getSelected();
+    let tickCount = 0;
+    const maxTicks = 22; // 약 1.4초 동안 셔플
+
+    const shuffleInterval = setInterval(() => {
+      tickCount++;
+      const randomCandidate = pool[Math.floor(Math.random() * pool.length)];
+
+      if (rouletteIcon) rouletteIcon.textContent = randomCandidate.icon || '⚡';
+      if (rouletteText) rouletteText.textContent = randomCandidate.text;
+      if (rouletteTip) rouletteTip.textContent = randomCandidate.tip || '';
+
+      sound.playRouletteTick();
+
+      if (tickCount >= maxTicks) {
+        clearInterval(shuffleInterval);
+
+        // 최종 벌칙 확정
+        const finalPenalty = this.penaltyManager.getRandomPenalty();
+        this.currentDrawnPenalty = finalPenalty;
+
+        if (rouletteSlot) {
+          rouletteSlot.className = 'roulette-slot-window awarded';
+        }
+        if (rouletteIcon) rouletteIcon.textContent = finalPenalty.icon || '⚡';
+        if (rouletteText) rouletteText.textContent = finalPenalty.text;
+        if (rouletteTip) rouletteTip.textContent = finalPenalty.tip || '';
+        if (btnSpinText) btnSpinText.textContent = '✅ 벌칙 확정 완료';
+
+        sound.playPenaltyAlert();
+        if (this.confetti) this.confetti.fire(90);
+
+        // 결과 저장
+        this.ceremonyJudgments[this.ceremonyIndex] = {
+          giver: currentMatch.giver,
+          receiver: currentMatch.receiver,
+          missionText: currentMatch.missionText,
+          result: 'fail',
+          penalty: finalPenalty
+        };
+
+        // 도장 스탬프 마크 및 인라인 벌칙 배너 표시
+        const stampMark = document.getElementById('c-stamp-mark');
+        const stampResultBox = document.getElementById('c-stamp-result-box');
+        const awardedBadge = document.getElementById('c-penalty-awarded-badge');
+        const awardedText = document.getElementById('c-penalty-awarded-text');
+
+        if (stampMark) {
+          stampMark.className = 'stamp-mark stamp-fail';
+          stampMark.textContent = '😂 BUSTED';
+        }
+        if (awardedBadge && awardedText) {
+          awardedText.textContent = `${finalPenalty.icon} ${finalPenalty.text}`;
+          awardedBadge.classList.remove('hidden');
+        }
+
+        this.updateNextGiverActionUi(currentMatch);
+
+        if (stampResultBox) {
+          stampResultBox.classList.remove('hidden');
+        }
+
+        // 다시 뽑기 기회 제어 (1회 제공)
+        if (!isRespin) {
+          if (btnRespin) btnRespin.classList.remove('hidden');
+        } else {
+          if (btnRespin) btnRespin.classList.add('hidden');
+          this.hasRespun = true;
+        }
+
+        this.isRouletteRolling = false;
+      }
+    }, 65);
+  }
+
+  updateNextGiverActionUi(currentMatch) {
     const isLast = this.ceremonyIndex === this.ceremonyChain.length - 1;
     const nextGiverNameEl = document.getElementById('c-next-giver-name');
     const btnNextNameEl = document.getElementById('c-btn-next-name');
@@ -1171,12 +1874,6 @@ class ManitoApp {
         btnCNextStep.innerHTML = `<span>다음 주자(<strong>${nextGiver}</strong>)에게 바통 넘기기 ➡️</span>`;
       }
     }
-
-    // 판정 섹션 전환
-    const judgmentSection = document.getElementById('c-judgment-section');
-    const stampResultBox = document.getElementById('c-stamp-result-box');
-    if (judgmentSection) judgmentSection.classList.add('hidden');
-    if (stampResultBox) stampResultBox.classList.remove('hidden');
   }
 
   advanceCeremonyStep() {
@@ -1217,6 +1914,28 @@ class ManitoApp {
     if (elEffort) elEffort.textContent = effortCount;
     if (elFail) elFail.textContent = failCount;
 
+    // 💥 실패자가 있을 경우 명예 벌칙 수행단 요약 카드 렌더링
+    const failedJudgments = this.ceremonyJudgments.filter(j => j && j.result === 'fail');
+    const penaltySummaryCard = document.getElementById('finale-penalty-summary');
+    const penaltyCountEl = document.getElementById('finale-penalty-count');
+    const penaltyListEl = document.getElementById('finale-penalty-list');
+
+    if (penaltySummaryCard && penaltyCountEl && penaltyListEl) {
+      if (failedJudgments.length > 0) {
+        penaltyCountEl.textContent = failedJudgments.length;
+        penaltyListEl.innerHTML = failedJudgments.map(j => `
+          <div class="penalty-summary-card">
+            <span class="penalty-summary-giver">${j.giver}</span>
+            <span class="penalty-summary-arrow">👉</span>
+            <span class="penalty-summary-task">${j.penalty ? `${j.penalty.icon} ${j.penalty.text}` : '벌칙 미정'}</span>
+          </div>
+        `).join('');
+        penaltySummaryCard.classList.remove('hidden');
+      } else {
+        penaltySummaryCard.classList.add('hidden');
+      }
+    }
+
     // 히스토리 테이블 채우기
     const tbody = document.getElementById('finale-history-tbody');
     if (tbody) {
@@ -1228,6 +1947,9 @@ class ManitoApp {
           badge = '<span class="history-badge effort">🤔 노력 인정</span>';
         } else {
           badge = '<span class="history-badge fail">😂 실패</span>';
+          if (j.penalty) {
+            badge += `<div class="penalty-badge-pill">⚡ ${j.penalty.icon} ${j.penalty.text}</div>`;
+          }
         }
 
         return `
@@ -1247,6 +1969,11 @@ class ManitoApp {
   // VIEW 4: 단체방 공용 룸 접속 로직 (#/room)
   // =========================================================================
   loadRoomView(roomToken) {
+    if (this.roomUnsubscribe) {
+      this.roomUnsubscribe();
+      this.roomUnsubscribe = null;
+    }
+
     const inspected = inspectRoomBundle(roomToken);
     if (!inspected.success) {
       alert(inspected.error || '유효하지 않은 마니또 방 링크입니다.');
@@ -1259,16 +1986,75 @@ class ManitoApp {
     if (titleEl) titleEl.textContent = inspected.roomTitle || '우리팀 시크릿 마니또';
     if (infoEl) infoEl.textContent = inspected.deadline ? `활동 기간: ${inspected.deadline}` : '쉿! 본인의 이름을 선택하여 마니또 대상을 확인하세요.';
 
-    const grid = document.getElementById('room-members-grid');
-    if (!grid) return;
+    // 1차 즉시 로컬 렌더링
+    this.renderRoomMemberList(roomToken, inspected.members, null);
+    this.updateRoomSyncUi(null);
 
-    grid.innerHTML = inspected.members.map(m => `
-      <button type="button" class="room-member-btn" data-name="${m.name}">
-        <span class="room-member-avatar">${m.name.charAt(0)}</span>
-        <span class="room-member-name">${m.name}</span>
-        <span class="room-lock-icon">${m.hasPin ? '🔒' : '👉'}</span>
-      </button>
-    `).join('');
+    // 실시간 클라우드 DB 구독 시작
+    this.roomUnsubscribe = subscribeRoom(roomToken, inspected, (liveData) => {
+      this.liveRoomData = liveData;
+      this.updateRoomSyncUi(liveData);
+      this.renderRoomMemberList(roomToken, inspected.members, liveData);
+    }, (err) => {
+      console.warn('Realtime room sync failed:', err);
+      this.updateRoomSyncUi(null);
+    });
+  }
+
+  updateRoomSyncUi(liveData) {
+    const pill = document.getElementById('room-sync-pill');
+    const text = document.getElementById('room-sync-text');
+    if (!pill || !text) return;
+
+    if (isDbConnected() && liveData) {
+      pill.classList.add('connected');
+      const members = liveData.members || {};
+      const total = Object.keys(members).length;
+      const claimed = Object.values(members).filter(m => m.isClaimed).length;
+      const viewed = Object.values(members).filter(m => m.isViewed).length;
+      text.textContent = `🟢 실시간 클라우드 동기화 중 (${claimed}/${total}명 잠금, ${viewed}명 확인)`;
+    } else if (isDbConnected()) {
+      pill.classList.add('connected');
+      text.textContent = '🟢 실시간 클라우드 연결됨';
+    } else {
+      pill.classList.remove('connected');
+      text.textContent = '💾 로컬 모드 (기기별 저장)';
+    }
+  }
+
+  renderRoomMemberList(roomToken, members, liveData) {
+    const grid = document.getElementById('room-members-grid');
+    if (!grid || !members) return;
+
+    grid.innerHTML = members.map(m => {
+      const liveMember = liveData?.members?.[m.name];
+      const localHash = getLocalMemberPinHash(roomToken, m.name);
+
+      const isViewed = !!liveMember?.isViewed;
+      const isClaimed = !!liveMember?.isClaimed || m.hasPin || !!localHash;
+
+      let btnClass = 'room-member-btn';
+      let tagHtml = '';
+
+      if (isViewed) {
+        btnClass += ' status-viewed';
+        tagHtml = '<span class="room-member-status-tag tag-viewed">✅ 확인 완료</span>';
+      } else if (isClaimed) {
+        btnClass += ' status-claimed';
+        tagHtml = '<span class="room-member-status-tag tag-claimed">🔒 비밀번호 잠김</span>';
+      } else {
+        btnClass += ' status-unclaimed';
+        tagHtml = '<span class="room-member-status-tag tag-unclaimed">🔓 미등록 (본인 확인)</span>';
+      }
+
+      return `
+        <button type="button" class="${btnClass}" data-name="${m.name}">
+          <span class="room-member-avatar">${m.name.charAt(0)}</span>
+          <span class="room-member-name">${m.name}</span>
+          ${tagHtml}
+        </button>
+      `;
+    }).join('');
 
     grid.querySelectorAll('.room-member-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -1290,12 +2076,17 @@ class ManitoApp {
     const member = inspected.members?.find(m => m.name === memberName);
     const existingPinHash = getLocalMemberPinHash(roomToken, memberName);
 
+    // 실시간 DB 데이터 확인
+    const liveMember = this.liveRoomData?.members?.[memberName];
+    const isClaimedInDb = !!liveMember?.isClaimed;
+    const dbPinHash = liveMember?.pinHash || '';
+
     if (member && member.hasPin) {
       // 주최자가 사전에 PIN을 정했던 경우 (하위 호환)
       this.showPinGate(memberName, false, '');
-    } else if (existingPinHash) {
-      // 이미 본인 비밀번호를 설정한 경우 -> 잠금 해제 입력
-      this.showPinGate(memberName, false, existingPinHash);
+    } else if (isClaimedInDb || existingPinHash) {
+      // 이미 비밀번호가 설정된 경우 -> 잠금 해제 모드
+      this.showPinGate(memberName, false, dbPinHash || existingPinHash);
     } else {
       // 아직 비밀번호가 등록되지 않은 신규 참가자 -> 본인 비밀번호 셀프 등록 모드!
       this.showPinGate(memberName, true, '');
@@ -1424,7 +2215,7 @@ class ManitoApp {
     }
   }
 
-  verifyAndUnlockPin(pin) {
+  async verifyAndUnlockPin(pin) {
     const errorText = document.getElementById('pin-error-text');
     const gateCard = document.querySelector('.pin-gate-card');
     const stepGuide = document.getElementById('pin-step-guide');
@@ -1444,9 +2235,25 @@ class ManitoApp {
       } else if (this.pinSetupStep === 2) {
         // 2단계 완료 -> 두 입력값 일치 여부 검사
         if (pin === this.pinFirstInput) {
-          // 일치! 로컬스토리지에 해시 저장
           const roomKey = this.pendingRoomToken || 'single';
           setLocalMemberPinHash(roomKey, this.pendingMemberName, pin);
+
+          // 클라우드 DB에 비밀번호 등록(잠금)
+          if (this.pendingRoomToken && this.pendingMemberName) {
+            const claimRes = await claimMemberPin(this.pendingRoomToken, this.pendingMemberName, pin);
+            if (!claimRes.success && claimRes.error) {
+              sound.playPop();
+              if (errorText) {
+                errorText.textContent = `❌ ${claimRes.error}`;
+                errorText.classList.remove('hidden');
+              }
+              this.pinSetupStep = 1;
+              this.pinFirstInput = '';
+              this.currentPin = '';
+              this.updatePinDots();
+              return;
+            }
+          }
 
           // 데이터 복호화 진행
           let result = null;
@@ -1468,6 +2275,10 @@ class ManitoApp {
 
             this.showToast(`🎉 ${this.pendingMemberName}님의 4자리 비밀번호가 안전하게 등록되었습니다!`);
             this.displayRevealResult(result.data);
+
+            if (this.pendingRoomToken) {
+              markMemberViewed(this.pendingRoomToken, this.pendingMemberName);
+            }
             return;
           }
         }
@@ -1493,7 +2304,30 @@ class ManitoApp {
     }
 
     // 2. 이미 등록된 비밀번호 확인(잠금 해제) 모드인 경우
-    if (this.expectedPinHash) {
+    if (this.pendingRoomToken && this.pendingMemberName) {
+      const dbVerify = await verifyMemberPinWithDb(
+        this.pendingRoomToken,
+        this.pendingMemberName,
+        pin,
+        this.liveRoomData
+      );
+
+      if (!dbVerify.isValid) {
+        sound.playPop();
+        if (errorText) {
+          errorText.textContent = '❌ 비밀번호가 일치하지 않습니다. 다시 확인해주세요.';
+          errorText.classList.remove('hidden');
+        }
+        if (gateCard) {
+          gateCard.classList.remove('shake');
+          void gateCard.offsetWidth;
+          gateCard.classList.add('shake');
+        }
+        this.currentPin = '';
+        this.updatePinDots();
+        return;
+      }
+    } else if (this.expectedPinHash) {
       const roomKey = this.pendingRoomToken || 'single';
       const isValid = verifyMemberPin(roomKey, this.pendingMemberName, pin, this.expectedPinHash);
       if (!isValid) {
@@ -1532,6 +2366,10 @@ class ManitoApp {
       if (stage) stage.classList.remove('hidden');
 
       this.displayRevealResult(result.data);
+
+      if (this.pendingRoomToken && this.pendingMemberName) {
+        markMemberViewed(this.pendingRoomToken, this.pendingMemberName);
+      }
     } else {
       sound.playPop();
       if (errorText) {

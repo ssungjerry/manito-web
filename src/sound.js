@@ -277,6 +277,75 @@ class SoundController {
       console.warn('Audio playback error:', e);
     }
   }
+
+  /**
+   * 벌칙 룰렛 회전 틱 사운드 (슬롯머신/룰렛 회전 시)
+   */
+  playRouletteTick() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      const freq = 600 + Math.random() * 200;
+      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(300, this.ctx.currentTime + 0.04);
+
+      gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.04);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.045);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /**
+   * 벌칙 당첨 알림 사운드 (드라마틱한 코믹 충격음)
+   */
+  playPenaltyAlert() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      // 코믹한 '동~동~당!' 효과
+      const notes = [
+        { f: 493.88, t: 0, d: 0.12 },     // B4
+        { f: 466.16, t: 0.12, d: 0.12 },  // Bb4
+        { f: 440.00, t: 0.24, d: 0.14 },  // A4
+        { f: 233.08, t: 0.38, d: 0.6 }    // Bb3 (하강)
+      ];
+
+      notes.forEach(({ f, t, d }) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(f, now + t);
+
+        gain.gain.setValueAtTime(0.18, now + t);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + t + d);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now + t);
+        osc.stop(now + t + d);
+      });
+    } catch (e) {
+      console.warn('Audio playback error:', e);
+    }
+  }
 }
 
 export const sound = new SoundController();

@@ -6,5 +6,14 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: true // 모든 외부 호스트(터널링, 로컬 IP 등) 접속 허용
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          firebase: ['firebase/app', 'firebase/firestore']
+        }
+      }
+    }
   }
 });
