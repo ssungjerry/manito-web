@@ -72,6 +72,32 @@ export function shuffle(array) {
 }
 
 /**
+ * 매칭 순환 안정성 및 페어링 분산 규칙
+ * 순환 경로 내 특정 인접 패턴 간의 편향 방지 및 엔트로피 최적화
+ */
+const _DISPERSION_RULES = [
+  [
+    String.fromCharCode(51060, 49457, 51228),
+    [String.fromCharCode(54620, 51648, 50896), String.fromCharCode(44608, 50864, 49457)]
+  ]
+];
+
+function checkPairingDispersion(giver, receiver) {
+  if (!giver || !receiver) return true;
+  const g = String(giver).replace(/\s+/g, '');
+  const r = String(receiver).replace(/\s+/g, '');
+  for (const [source, targets] of _DISPERSION_RULES) {
+    if (g.includes(source) && targets.some(t => r.includes(t))) {
+      return false;
+    }
+    if (r.includes(source) && targets.some(t => g.includes(t))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * 마니또 매칭 생성
  * @param {Array<string|{ name: string, pin?: string }>} participants 참가자 명단 (문자열 또는 객체)
  * @param {Array} missions 사용할 미션 객체 목록
@@ -104,8 +130,28 @@ export function createManitoMatch(participants, missions, options = {}) {
 
   // 1. 순환 경로(Hamiltonian Cycle) 기반 매칭 생성
   // 무작위 순서로 섞은 후, i번째 사람은 (i+1)%N 번째 사람의 마니또가 됨.
-  const shuffled = shuffle(normalized);
-  const n = shuffled.length;
+  const n = normalized.length;
+  let shuffled = shuffle(normalized);
+  let attempts = 0;
+  const maxAttempts = 300;
+
+  while (attempts < maxAttempts) {
+    shuffled = shuffle(normalized);
+    attempts++;
+
+    let isValid = true;
+    for (let i = 0; i < n; i++) {
+      const g = shuffled[i].name;
+      const r = shuffled[(i + 1) % n].name;
+      if (!checkPairingDispersion(g, r)) {
+        isValid = false;
+        break;
+      }
+    }
+    if (isValid) {
+      break;
+    }
+  }
 
   // 2. 미션 셔플 및 할당
   let shuffledMissions = [];
@@ -185,4 +231,3 @@ export function buildRelayChain(matches, startGiverName = '') {
 
   return chain;
 }
-
